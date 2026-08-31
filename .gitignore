@@ -1,0 +1,19 @@
+# secrets / env
+.env
+.env.*
+!.env.example
+auth.json
+**/.grok/
+*.pem
+*.key
+cookies.txt
+
+# local runtime
+node_modules/
+dist/
+*.log
+devTools/
+playground-shots/
+*.tap
+turns/
+.DS_Store

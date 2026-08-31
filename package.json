@@ -1,0 +1,28 @@
+{
+  "name": "teams-harness",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "HARNESS_ACP_TIMEOUT_MS=180000 HARNESS_JOB_MS=15000 PATH=\"$HOME/.grok/bin:$HOME/.local/bin:$PATH\" tsx --test --test-concurrency=1 --test-timeout=240000 test/mcp.graph.test.ts test/mcp.write-scope.test.ts test/parseActivity.test.ts test/spawn.test.ts test/seen-cursor.test.ts test/harness.test.ts test/http.test.ts test/verify.loops.test.ts test/verify.channel.loops.test.ts test/channelWatch.test.ts",
+    "test:real": "HARNESS_ACP_TIMEOUT_MS=180000 HARNESS_JOB_MS=15000 PATH=\"$HOME/.grok/bin:$HOME/.local/bin:$PATH\" tsx --test --test-concurrency=1 --test-timeout=240000 test/verify.loops.test.ts",
+    "playground": "node scripts/playground.mjs"
+  },
+  "dependencies": {
+    "@microsoft/teams.apps": "2.0.15"
+  },
+  "devDependencies": {
+    "@microsoft/m365agentsplayground": "^0.2.28",
+    "@types/node": "^22.17.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "license": "MIT",
+  "description": "Bot Framework webhook host; grok CLI worker; MCP-only Graph-shaped Work IQ tools; Agents Playground for local verify."
+}
