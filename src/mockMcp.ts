@@ -21,6 +21,7 @@ export type RememberedInbound = {
   text: string;
   replyToId?: MessageId;
   conversationType?: string;
+  conversationId?: string;
 };
 
 export type OutboundReactionArgs = {
@@ -56,6 +57,7 @@ export class MockTeamsMcp {
   private readonly routes = new Map<string, { serviceUrl: string; conversationId: string }>();
   private readonly inboundTexts = new Map<string, RememberedInbound>();
   private readonly postedReactKeys = new Set<string>();
+  private readonly postedOutboundKeys = new Set<string>();
 
   attachOutbound(outbound: OutboundApply): void {
     this.outbound = outbound;
@@ -73,6 +75,7 @@ export class MockTeamsMcp {
     text: string;
     replyToId?: MessageId;
     conversationType?: string;
+    conversationId?: string;
   }): void {
     const rec: RememberedInbound = { text: message.text };
     if (message.replyToId !== undefined) {
@@ -80,6 +83,9 @@ export class MockTeamsMcp {
     }
     if (message.conversationType !== undefined) {
       rec.conversationType = message.conversationType;
+    }
+    if (message.conversationId !== undefined && message.conversationId.length > 0) {
+      rec.conversationId = message.conversationId;
     }
     this.inboundTexts.set(message.messageId, rec);
   }
@@ -191,21 +197,40 @@ export class MockTeamsMcp {
     }
     if (isPostTool(tool)) {
       const text = extractPostText(args);
-      const already = this.sent.some((s) => s.text === text);
+      const graphId = conversationIdFromArgs(args);
+      const route = this.lookupRoute(args, graphId);
+      const conversationId = route?.conversationId ?? graphId;
+      const already = this.sent.some((s) => s.text === text && s.conversationId === conversationId);
       if (already) {
         return;
       }
       this.seq += 1;
-      const graphId = conversationIdFromArgs(args);
-      const route = this.lookupRoute(args, graphId);
       const sent: SentMessage = {
-        conversationId: route?.conversationId ?? graphId,
+        conversationId,
         serviceUrl: route?.serviceUrl ?? "",
         text,
         messageId: brandMessageId(`mcp-msg-${this.seq}`),
       };
+      const replyToId = threadReplyToId(conversationId);
+      if (replyToId !== undefined) {
+        sent.replyToId = replyToId;
+      }
       this.sent.push(sent);
+      void this.flushLastPost();
     }
+  }
+
+  private async flushLastPost(): Promise<void> {
+    const last = this.sent[this.sent.length - 1];
+    if (last === undefined || last.text.length === 0 || this.outbound === undefined) {
+      return;
+    }
+    const key = `${last.conversationId}\0${last.text}`;
+    if (this.postedOutboundKeys.has(key)) {
+      return;
+    }
+    this.postedOutboundKeys.add(key);
+    await this.outbound.sendMessage(last);
   }
 
   async applyFromCallback(raw: unknown): Promise<void> {
@@ -214,7 +239,11 @@ export class MockTeamsMcp {
       return;
     }
     const tool = readString(raw.tool);
-    const args = isRecord(raw.args) ? raw.args : {};
+    const rawArgs = isRecord(raw.args) ? raw.args : {};
+    const result = isRecord(raw.result) ? raw.result : {};
+    const bound = isRecord(result.bound) ? result.bound : {};
+    const boundArgs = isRecord(bound.args) ? bound.args : {};
+    const args: Record<string, unknown> = { ...rawArgs, ...boundArgs };
     if (tool !== undefined && isSetReactionTool(tool)) {
       const reaction = extractReaction(args);
       if (reaction !== undefined) {
@@ -228,10 +257,7 @@ export class MockTeamsMcp {
       }
     }
     if (tool !== undefined && isPostTool(tool)) {
-      const last = this.sent[this.sent.length - 1];
-      if (last !== undefined) {
-        await this.outbound.sendMessage(last);
-      }
+      await this.flushLastPost();
     }
   }
 
@@ -240,8 +266,12 @@ export class MockTeamsMcp {
     reaction: { messageId: string; emoji: string },
   ): OutboundReactionArgs {
     const graphId = conversationIdFromArgs(args);
-    const route = this.lookupRoute(args, graphId);
     const remembered = this.inboundTexts.get(reaction.messageId);
+    const route =
+      this.lookupRoute(args, graphId) ??
+      (remembered?.conversationId !== undefined
+        ? this.lookupRoute({}, remembered.conversationId)
+        : undefined);
     const payload: OutboundReactionArgs = {
       conversationId: route?.conversationId ?? graphId,
       serviceUrl: route?.serviceUrl ?? "",
@@ -277,8 +307,11 @@ export class MockTeamsMcp {
   ): { serviceUrl: string; conversationId: string } | undefined {
     for (const key of [
       readString(args["chat-id"]),
+      readString(args.chatId),
       readString(args["channel-id"]),
+      readString(args.channelId),
       readString(args["team-id"]),
+      readString(args.teamId),
       conversationId,
     ]) {
       if (key === undefined || key.length === 0) {
@@ -293,6 +326,27 @@ export class MockTeamsMcp {
   }
 }
 
+export function threadReplyToId(conversationId: string): MessageId | undefined {
+  const marker = ";messageid=";
+  const i = conversationId.indexOf(marker);
+  if (i < 0) {
+    return undefined;
+  }
+  const id = conversationId.slice(i + marker.length);
+  if (id.length === 0) {
+    return undefined;
+  }
+  return brandMessageId(id);
+}
+
 function conversationIdFromArgs(args: Record<string, unknown>): string {
-  return readString(args["chat-id"]) ?? readString(args["channel-id"]) ?? readString(args["team-id"]) ?? "";
+  return (
+    readString(args["chat-id"]) ??
+    readString(args.chatId) ??
+    readString(args["channel-id"]) ??
+    readString(args.channelId) ??
+    readString(args["team-id"]) ??
+    readString(args.teamId) ??
+    ""
+  );
 }

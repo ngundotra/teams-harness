@@ -165,12 +165,17 @@ export function extractPostText(args: Record<string, unknown>): string {
   if (fromBody.length > 0) {
     return fromBody;
   }
-  return bodyText(args.text);
+  const fromText = bodyText(args.text);
+  if (fromText.length > 0) {
+    return fromText;
+  }
+  return bodyText(args.content);
 }
 
 export function extractReaction(args: Record<string, unknown>): { messageId: string; emoji: string } | undefined {
-  const messageId = readString(args["message-id"]);
-  const emoji = readString(args.reactionType) ?? readString(args.emoji);
+  const messageId = readString(args["message-id"]) ?? readString(args.messageId);
+  const emoji =
+    readString(args.reactionType) ?? readString(args.emoji) ?? readString(args.reaction);
   if (messageId === undefined || emoji === undefined) {
     return undefined;
   }

@@ -1,55 +1,76 @@
 # teams-harness
 
-Bot Framework webhook inbound plus grok CLI worker plus MCP-only Graph-shaped Teams ops.
+Bot Framework webhook inbound. grok CLI worker. MCP-only Graph-shaped Teams ops.
 
-Local proof is Microsoft 365 Agents Playground on port 56150.
-The node test runner is not local-done.
+Local proof is Microsoft 365 Agents Playground at http://localhost:56150/. npm test is not local-done.
+
+Use localhost, not 127.0.0.1. Two tabs of the same playground origin break compose.
 
 ## Architecture
 
-- **Inbound:** Bot Framework activity webhook POST /api/messages on port 3978 (default). Immediate ack Working on it before grok is ready. Not Microsoft Graph.
-- **Worker:** grok CLI agent over stdio with always-approve. The host never spawns a tsx harness worker. Grok has no Graph credentials.
-- **Outbound Teams ops:** MCP only. Graph-shaped Work IQ tool names mcp_graph_chat_* and mcp_graph_teams_* over generic MCP servers teams-read / teams-post. Do not hardcode a tenant Work IQ URL.
-- **Graph-backed MCP:** When GRAPH_TOKEN or client credentials (GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, GRAPH_TENANT_ID) are set, MCP tools call Microsoft Graph. Otherwise they fall back to the in-process playground mock.
-- **Channel watch (optional):** polls MCP listChannelMessages when HARNESS_TEAM_ID and HARNESS_CHANNEL_ID are set. Still MCP, not a Graph SDK.
-- **Local verify UI:** Microsoft 365 Agents Playground on port 56150 pointed at http://localhost:3978/api/messages.
+- Inbound: Bot Framework POST /api/messages on :3978. Ack Working on it immediately. Not Graph.
+- Worker: real grok CLI (grok agent --always-approve stdio). No grok shim.
+- Outbound: MCP only. Tool names mcp_graph_chat_* and mcp_graph_teams_* on teams-read (channel-wide) and teams-post (thread-bound). Do not call Graph from the bot process.
+- Graph-backed MCP: GRAPH_TOKEN or GRAPH_CLIENT_ID + GRAPH_CLIENT_SECRET + GRAPH_TENANT_ID. Unset token uses the in-process playground mock. Graph REST lives inside MCP, not a second control plane.
+- Channel watch (optional): MCP listChannelMessages when HARNESS_TEAM_ID and HARNESS_CHANNEL_ID are set.
 
 ## Setup
 
-Requires Node 20+ and grok on PATH (~/.grok/bin or ~/.local/bin).
+Node 20+ and grok on PATH (~/.grok/bin or ~/.local/bin).
 
-Auth is the grok CLI cache or XAI_API_KEY in the environment. Never commit auth.json or .env.
+Auth is the grok CLI cache or XAI_API_KEY. Never commit auth.json or .env.
 
-Commands:
-- install
-- run dev (HTTP on :3978)
-- run playground
-- agentsplayground endpoint localhost:3978/api/messages channel msteams port 56150
+    npm install
+    npm run dev
 
-Open http://127.0.0.1:56150 -- that UI is the receipt that counts.
+Playground (ungates compose + reaction copies, then starts the harness):
+
+    npm run playground
+
+or:
+
+    agentsplayground -e http://localhost:3978/api/messages -c msteams -p 56150
+
+Open http://localhost:56150/  one tab.
 
 ## Verification
 
-The node test runner is not local-done. Unit and loop coverage helps; it does not ship the product.
+The node runner is coverage. It is not the receipt.
 
-Done = 10 playground loops in Agents Playground at port 56150 against the harness on :3978, with screenshot receipts:
+Done = ten playground loops against the harness on :3978, each with a screenshot of the Playground UI (not a log line, not npm test). Track them in a Notion table with two properties:
 
-1. Personal: first message, immediate ack, grok spawned, eyes seen-cursor, final MCP post.
-2. Personal: follow-up during the job, injected, no second grok.
-3. Personal: messageReaction keyed by replyToId / target messageId.
-4. Personal: grok setReaction recorded as Work IQ MCP mcp_graph_chat_setReaction.
-5. Personal: final reply lists original, follow-ups, per-message reactions.
-6. Group chat: same long-turn plus MCP post (not a channel thread).
-7. Channel: thread reply stays in-thread mcp_graph_teams_replyToChannelMessage.
-8. Channel: follow-up injected mid-turn, same destination.
-9. Channel: intra-thread reaction via MCP mcp_graph_teams_setReaction.
-10. Channel: injected extra plus final reply in the same thread.
+- Loop (title)
+- Status (yes / not yet)
 
-Keep the Playground window at http://127.0.0.1:56150 as the receipt. Passing unit tests without those 10 loops is not a ship receipt.
+No in-progress select. Put the receipt note (unique probe text, screenshot path) on the page body when it flips to yes.
+
+The ten loops:
+
+1. DM. bot responds
+2. DM. mid-turn follow-ups
+3. DM. react intra-turn
+4. Group. bot responds
+5. Group. mid-turn follow-ups
+6. Group. react intra-turn
+7. Channel. respond to new posts
+8. Channel. thread replies stay in-thread
+9. Channel. read follow-up replies intra-turn
+10. Channel. set reactions in thread
+
+How to run them:
+
+- DM / group: type in the bottom composer, Enter.
+- Channel new post: top Start a new post, then Post. The thread box under an existing post is a reply, not a new post.
+- Mid-turn (2, 5, 9, and the star loops): send the follow-up while Working on it is still showing. Waiting until the grok report lands starts a new turn.
+- Pass is a grok content bubble (original text, follow-ups listed, or a visible star copy). Eyes and Working on it are acks only.
+- Playground cannot render reaction chips. The harness posts a copy of the target (eyes prefix / star prefix). Visible star copy is the react pass.
+
+Keep one playground tab. Passing unit tests without those ten screenshots is not a ship receipt.
 
 ## Environment
 
 All optional except grok auth.
+
 - PORT default 3978
 - TEAMS_SKIP_AUTH skip Bot Framework auth locally (default on)
 - HARNESS_JOB_MS job window
@@ -63,7 +84,7 @@ All optional except grok auth.
 - GRAPH_CLIENT_ID GRAPH_CLIENT_SECRET GRAPH_TENANT_ID client-credentials Graph auth when GRAPH_TOKEN is unset
 - XAI_API_KEY grok ACP if offered; do not commit
 
-Without GRAPH_TOKEN or client credentials, MCP tools use the playground mock fallback.
+Without Graph creds, MCP tools use the playground mock.
 
 ## License
 

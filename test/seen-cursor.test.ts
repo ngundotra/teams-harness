@@ -7,7 +7,7 @@ import {
   TOOL_CHAT_UNSET_REACTION,
   TOOL_DRAIN_INBOX,
 } from "../src/mcp/tools.js";
-import { MockTeamsMcp } from "../src/mockMcp.js";
+import { MockTeamsMcp, threadReplyToId } from "../src/mockMcp.js";
 import { reactionCopyText, readSeenMessageId, seenWalk, writeSeenMessageId } from "../src/seenCursor.js";
 import {
   type InboundMessage,
@@ -74,6 +74,26 @@ test("setReaction outbound copies the target message text", async () => {
   assert.equal(reacted[0]?.messageId, "m1");
 });
 
+test("setReaction outbound accepts grok camelCase messageId and reaction", async () => {
+  const mcp = new MockTeamsMcp();
+  const reacted: Array<{ text?: string; emoji: string }> = [];
+  mcp.attachOutbound({
+    sendMessage: async () => {},
+    setReaction: async (args) => {
+      reacted.push({ text: args.text, emoji: args.emoji });
+    },
+  });
+  mcp.rememberRoute("chat-1", "http://localhost:56150/_connector", "chat-1");
+  mcp.rememberInbound({ messageId: "m2", text: "pg-dm-3 star this", conversationId: "chat-1" });
+  await mcp.applyFromCallback({
+    tool: "mcp_graph_chat_setReaction",
+    args: { messageId: "m2", reaction: "star" },
+  });
+  assert.equal(reacted.length, 1);
+  assert.equal(reacted[0]?.emoji, "star");
+  assert.equal(reacted[0]?.text, "pg-dm-3 star this");
+});
+
 test("drain walks eyes onto each new follow-up and unsets the previous", async () => {
   const turnId = brandTurnId("seen-drain-1");
   writeSeenMessageId(turnId, "start");
@@ -112,5 +132,53 @@ test("extractPostText accepts text when body is missing", () => {
   assert.equal(extractPostText({ body: "from-body" }), "from-body");
   assert.equal(extractPostText({ text: "from-text" }), "from-text");
   assert.equal(extractPostText({ body: "from-body", text: "from-text" }), "from-body");
+  assert.equal(extractPostText({ content: "from-content" }), "from-content");
   assert.equal(extractPostText({}), "");
+});
+
+test("same post text still delivers to a second conversation", async () => {
+  const mcp = new MockTeamsMcp();
+  const sent: string[] = [];
+  mcp.attachOutbound({
+    sendMessage: async (msg) => {
+      sent.push(`${msg.conversationId}:${msg.text}`);
+    },
+    setReaction: async () => {},
+  });
+  mcp.rememberRoute("chat-a", "http://localhost:56150/_connector", "chat-a");
+  mcp.rememberRoute("chat-b", "http://localhost:56150/_connector", "chat-b");
+  await mcp.applyFromCallback({
+    tool: "mcp_graph_chat_postMessage",
+    args: { "chat-id": "chat-a", text: "same body" },
+  });
+  await mcp.applyFromCallback({
+    tool: "mcp_graph_chat_postMessage",
+    args: { "chat-id": "chat-b", text: "same body" },
+  });
+  assert.deepEqual(sent, ["chat-a:same body", "chat-b:same body"]);
+});
+
+test("poll hydrate then callback still delivers the post", async () => {
+  const mcp = new MockTeamsMcp();
+  const sent: string[] = [];
+  mcp.attachOutbound({
+    sendMessage: async (msg) => {
+      sent.push(msg.text);
+    },
+    setReaction: async () => {},
+  });
+  mcp.rememberRoute("team-id", "http://localhost:56150/_connector", "team-id;messageid=42");
+  const call = {
+    tool: "mcp_graph_teams_postChannelMessage",
+    args: { "team-id": "team-id", "channel-id": "team-id", text: "original text: pg-ch-1e ping" },
+  };
+  mcp.hydrateFromCalls([call]);
+  await mcp.applyFromCallback(call);
+  assert.deepEqual(sent, ["original text: pg-ch-1e ping"]);
+  assert.equal(mcp.sent[0]?.replyToId, "42");
+});
+
+test("threadReplyToId reads playground messageid suffix", () => {
+  assert.equal(threadReplyToId("team-id;messageid=1788137303458"), "1788137303458");
+  assert.equal(threadReplyToId("90a446ed-97f6-4708-bee1-29f8bb6a24c7"), undefined);
 });
