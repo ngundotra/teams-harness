@@ -38,6 +38,11 @@ def server_name_for_role(role: McpRole) -> str:
 
 
 def write_scope_from_message(message: Any) -> dict[str, str]:
+    from .surface import write_scope_from_surface
+
+    surface = getattr(message, "surface", None)
+    if surface is not None:
+        return write_scope_from_surface(surface)
     conversation_type = getattr(message, "conversation_type", None)
     if conversation_type == "channel":
         team_id = getattr(message, "team_id", None)

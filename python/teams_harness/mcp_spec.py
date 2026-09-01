@@ -59,6 +59,7 @@ def common_env(
     service_url: str,
     conversation_type: str,
     callback_url: str | None = None,
+    surface: dict[str, str] | None = None,
 ) -> list[AcpEnvVar]:
     env: list[AcpEnvVar] = [
         *inherited_env(),
@@ -70,6 +71,18 @@ def common_env(
     ]
     if callback_url:
         env.append({"name": "HOST_CALLBACK_URL", "value": callback_url})
+    if surface:
+        env.append({"name": "SURFACE_KIND", "value": surface["kind"]})
+        if surface["kind"] in ("dm", "group"):
+            env.append({"name": "SURFACE_CHAT_ID", "value": surface["chatId"]})
+        elif surface["kind"] == "thread":
+            env.extend(
+                [
+                    {"name": "SURFACE_TEAM_ID", "value": surface["teamId"]},
+                    {"name": "SURFACE_CHANNEL_ID", "value": surface["channelId"]},
+                    {"name": "SURFACE_THREAD_ID", "value": surface["threadId"]},
+                ]
+            )
     return env
 
 
@@ -111,6 +124,7 @@ def teams_mcp_servers(
     conversation_type: str,
     write_scope: dict[str, str],
     callback_url: str | None = None,
+    surface: dict[str, str] | None = None,
 ) -> dict[str, AcpMcpServerStdio]:
     shared = common_env(
         turn_id=turn_id,
@@ -119,6 +133,7 @@ def teams_mcp_servers(
         service_url=service_url,
         conversation_type=conversation_type,
         callback_url=callback_url,
+        surface=surface,
     )
     read = stdio_spec(role="read", env=shared)
     write = stdio_spec(role="write", env=[*shared, *write_scope_env(write_scope, conversation_id)])

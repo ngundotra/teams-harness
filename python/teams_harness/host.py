@@ -95,6 +95,7 @@ class HarnessHost:
             "service_url": message.service_url,
             "conversation_type": message.conversation_type,
             "write_scope": write_scope_from_message(message),
+            "surface": message.surface,
         }
         if self.callback_url:
             spec_kwargs["callback_url"] = self.callback_url
@@ -107,6 +108,7 @@ class HarnessHost:
             "CONVERSATION_ID": message.conversation_id,
             "SERVICE_URL": message.service_url,
             "CONVERSATION_TYPE": message.conversation_type,
+            "SURFACE_KIND": message.surface["kind"],
             "GROK_CONFIG": grok_config_for_mcp(servers["read"], servers["write"]),
         }
         child = self._spawn(child_env)

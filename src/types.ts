@@ -1,3 +1,7 @@
+import type { Surface } from "./surface.js";
+
+export type { Surface } from "./surface.js";
+
 export type Brand<T, B extends string> = T & { readonly __brand: B };
 
 export type TurnId = Brand<string, "TurnId">;
@@ -34,6 +38,7 @@ export type InboundMessage = {
   serviceUrl: string;
   fromId: string;
   conversationType: string;
+  surface: Surface;
   replyToId?: MessageId;
   teamId?: string;
   channelId?: string;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from teams_harness.surface import surface_from_fields
 from teams_harness.types import (
     InboundMessage,
     InboundReaction,
@@ -23,6 +24,17 @@ def inbound_message(
     team_id: str | None = None,
     channel_id: str | None = None,
 ) -> InboundMessage:
+    try:
+        surface = surface_from_fields(
+            conversation_id=conversation_id,
+            conversation_type=conversation_type,
+            message_id=message_id,
+            reply_to_id=reply_to_id,
+            team_id=team_id,
+            channel_id=channel_id,
+        )
+    except ValueError:
+        surface = {"kind": "dm", "chatId": conversation_id}
     return InboundMessage(
         kind="message",
         message_id=brand_message_id(message_id),
@@ -32,6 +44,7 @@ def inbound_message(
         service_url=service_url,
         from_id=from_id,
         conversation_type=conversation_type,
+        surface=surface,
         reply_to_id=brand_message_id(reply_to_id) if reply_to_id else None,
         team_id=team_id,
         channel_id=channel_id,

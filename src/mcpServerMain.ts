@@ -1,6 +1,6 @@
 import { writeFileSync, writeSync } from "node:fs";
 import { attachJsonRpcReader, encodeNdjson, parseJsonRpc, type JsonRpcId } from "./mcp/stdio.js";
-import { executeTool, toolList, turnIdFromEnv, writeScopeFromEnv } from "./mcp/runtime.js";
+import { executeTool, readToolContextFromEnv, toolList, turnIdFromEnv, writeScopeFromEnv } from "./mcp/runtime.js";
 import { ensureTurnDir, mcpReadyPath, mcpReadyRolePath } from "./inbox.js";
 import { parseMcpRole, serverNameForRole, type McpRole, type WriteScope } from "./mcp/tools.js";
 import { isRecord, readString } from "./types.js";
@@ -83,7 +83,7 @@ async function handle(
       writeFileSync(mcpReadyPath(turnId), "tools/list\n");
       writeFileSync(mcpReadyRolePath(turnId, role), "tools/list\n");
       process.stderr.write(`[mcp] tools/list role=${role}\n`);
-      ok(id, toolList(role));
+      ok(id, toolList(role, readToolContextFromEnv()));
       return;
     }
     if (method === "tools/call") {
@@ -96,7 +96,15 @@ async function handle(
         fail(id, "tools/call missing name");
         return;
       }
-      const result = await executeTool(turnId, name, params.arguments, role, scope);
+      const result = await executeTool(
+        turnId,
+        name,
+        params.arguments,
+        role,
+        scope,
+        undefined,
+        readToolContextFromEnv(),
+      );
       ok(id, {
         content: [{ type: "text", text: JSON.stringify(result) }],
         isError: false,

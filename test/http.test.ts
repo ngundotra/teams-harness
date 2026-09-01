@@ -145,5 +145,5 @@ test("personal / group / team scopes plus install, members added, thread reply",
   const team = await post(teamMessage("t1", "team hi"));
   assert.equal(firstResultKind(team.json), "started");
   const thread = await post(teamMessage("t2", "thread hi", "t1"));
-  assert.equal(firstResultKind(thread.json), "started");
+  assert.equal(firstResultKind(thread.json), "enqueued");
 });

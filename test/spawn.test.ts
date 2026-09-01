@@ -71,10 +71,13 @@ test("startPrompt does not tell grok to sleep", () => {
     serviceUrl: "",
     fromId: "u1",
     conversationType: "personal",
+    surface: { kind: "dm", chatId: "c1" },
   };
   const text = startPrompt(message);
   assert.match(text, /injected as extra prompts/);
   assert.match(text, /Do not sleep/);
+  assert.match(text, /"kind":"dm"/);
+  assert.match(text, /"chat-id":"c1"/);
   assert.equal(/Work for \d+ ms|seconds have elapsed|sleep \d+/i.test(text), false);
 });
 

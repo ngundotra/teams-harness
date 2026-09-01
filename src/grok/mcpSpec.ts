@@ -1,10 +1,13 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { DeployConfig, ReadPolicy } from "../deployConfig.js";
+import { conversationTypeFromSurface, surfaceEnvVars, type Surface } from "../surface.js";
 import {
   MCP_TEAMS_READ_SERVER,
   MCP_TEAMS_WRITE_SERVER,
   serverNameForRole,
+  writeScopeFromSurface,
   type McpRole,
   type WriteScope,
 } from "../mcp/tools.js";
@@ -34,6 +37,17 @@ function inheritedEnv(): AcpEnvVar[] {
   return out;
 }
 
+function readPolicyEnv(policy: ReadPolicy, readRecentThreads: boolean): AcpEnvVar[] {
+  const env: AcpEnvVar[] = [
+    { name: "READ_POLICY", value: policy.kind },
+    { name: "FEATURES_READ_RECENT_THREADS", value: readRecentThreads ? "true" : "false" },
+  ];
+  if (policy.kind === "allowlist") {
+    env.push({ name: "READ_CHANNELS", value: JSON.stringify(policy.channels) });
+  }
+  return env;
+}
+
 function commonEnv(args: {
   turnId: TurnId;
   turnsDir: string;
@@ -41,6 +55,9 @@ function commonEnv(args: {
   conversationId: string;
   serviceUrl: string;
   conversationType: string;
+  surface?: Surface;
+  readPolicy?: ReadPolicy;
+  readRecentThreads?: boolean;
 }): AcpEnvVar[] {
   const env: AcpEnvVar[] = [
     ...inheritedEnv(),
@@ -48,10 +65,19 @@ function commonEnv(args: {
     { name: "TURNS_DIR", value: args.turnsDir },
     { name: "CONVERSATION_ID", value: args.conversationId },
     { name: "SERVICE_URL", value: args.serviceUrl },
-    { name: "CONVERSATION_TYPE", value: args.conversationType },
+    {
+      name: "CONVERSATION_TYPE",
+      value: args.surface !== undefined ? conversationTypeFromSurface(args.surface) : args.conversationType,
+    },
   ];
   if (args.callbackUrl !== undefined && args.callbackUrl.length > 0) {
     env.push({ name: "HOST_CALLBACK_URL", value: args.callbackUrl });
+  }
+  if (args.surface !== undefined) {
+    env.push(...surfaceEnvVars(args.surface));
+  }
+  if (args.readPolicy !== undefined) {
+    env.push(...readPolicyEnv(args.readPolicy, args.readRecentThreads === true));
   }
   return env;
 }
@@ -99,13 +125,33 @@ export function teamsMcpServers(args: {
   conversationId: string;
   serviceUrl: string;
   conversationType: string;
-  writeScope: WriteScope;
+  writeScope?: WriteScope;
+  surface?: Surface;
+  deploy?: DeployConfig;
+  readPolicy?: ReadPolicy;
+  readRecentThreads?: boolean;
 }): { read: AcpMcpServerStdio; write: AcpMcpServerStdio } {
-  const shared = commonEnv(args);
+  const surface = args.surface;
+  const writeScope = args.writeScope ?? (surface !== undefined ? writeScopeFromSurface(surface) : undefined);
+  if (writeScope === undefined) {
+    throw new Error("teamsMcpServers requires surface or writeScope");
+  }
+  const readPolicy = args.readPolicy ?? args.deploy?.readPolicy;
+  const readRecentThreads = args.readRecentThreads ?? args.deploy?.features.readRecentThreads ?? false;
+  const shared = commonEnv({
+    turnId: args.turnId,
+    turnsDir: args.turnsDir,
+    conversationId: args.conversationId,
+    serviceUrl: args.serviceUrl,
+    conversationType: args.conversationType,
+    ...(args.callbackUrl !== undefined ? { callbackUrl: args.callbackUrl } : {}),
+    ...(surface !== undefined ? { surface } : {}),
+    ...(readPolicy !== undefined ? { readPolicy, readRecentThreads } : {}),
+  });
   const read = stdioSpec({ role: "read", env: shared });
   const write = stdioSpec({
     role: "write",
-    env: [...shared, ...writeScopeEnv(args.writeScope, args.conversationId)],
+    env: [...shared, ...writeScopeEnv(writeScope, args.conversationId)],
   });
   return { read, write };
 }

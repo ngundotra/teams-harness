@@ -8,8 +8,12 @@ import {
 } from "../src/mcp/runtime.js";
 import {
   TOOL_CHAT_POST,
+  TOOL_TEAMS_LIST,
+  TOOL_TEAMS_LIST_RECENT,
+  TOOL_TEAMS_LIST_REPLIES,
   TOOL_TEAMS_POST,
   TOOL_TEAMS_REPLY,
+  readToolNames,
   toolDefsForRole,
   type WriteScope,
 } from "../src/mcp/tools.js";
@@ -129,6 +133,37 @@ test("channel scope pins replyToChannelMessage to the bound threadId", () => {
   assert.equal(readString(bound.args["channel-id"]), "bound-channel");
   const stored = listedChannelMessages();
   assert.equal(stored[0]?.replyToId, "bound-thread");
+});
+
+test("thread-only executeTool refuses listChannelMessages", async () => {
+  const result = asRecord(
+    await executeTool(
+      brandTurnId("thread-only-refuse-list"),
+      TOOL_TEAMS_LIST,
+      { "team-id": "t", "channel-id": "c" },
+      "read",
+      undefined,
+      { kind: "thread", teamId: "t", channelId: "c", threadId: "th" },
+      {
+        surface: { kind: "thread", teamId: "t", channelId: "c", threadId: "th" },
+        readPolicy: { kind: "thread-only" },
+        readRecentThreads: false,
+      },
+    ),
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "tool not on this server");
+});
+
+test("thread-only read defs omit listChannelMessages", () => {
+  const names = readToolNames({
+    surface: { kind: "thread", teamId: "t", channelId: "c", threadId: "th" },
+    readPolicy: { kind: "thread-only" },
+    readRecentThreads: false,
+  });
+  assert.equal(names.includes(TOOL_TEAMS_LIST), false);
+  assert.equal(names.includes(TOOL_TEAMS_LIST_RECENT), false);
+  assert.equal(names.includes(TOOL_TEAMS_LIST_REPLIES), true);
 });
 
 test("executeTool on read role refuses TOOL_CHAT_POST", async () => {

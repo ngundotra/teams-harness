@@ -1,0 +1,33 @@
+# Deploy-time Teams harness config. TOML is the source of truth.
+# Env vars (PORT, HARNESS_READ_POLICY, HARNESS_TEAM_ID, …) may override for tests.
+# Graph tokens and XAI_API_KEY stay in the environment — do not put secrets here.
+
+# thread-only | surface | allowlist
+# thread-only: data plane off. teams-read may list/get THIS thread only
+#   (listChannelMessageReplies). No listChannelMessages. No extra chats/channels.
+# surface: read this DM / group / channel (including recent threads when the flag is on).
+# allowlist: surface plus the channels below. read_channels is required and nonempty.
+read_policy = "surface"
+
+# Required nonempty only when read_policy = "allowlist".
+# thread-only and surface must not set this.
+# read_channels = [
+#   { team = "19:team-id@thread.tacv2", channel = "19:channel-id@thread.tacv2" },
+# ]
+
+[features]
+# When true and policy is not thread-only, advertise mcp_graph_teams_listRecentThreads.
+# Off means the tool is absent, not present-and-error.
+read_recent_threads = false
+
+# Existing knobs (same meaning as the env names).
+port = 3978
+skip_auth = true
+turns_dir = "/tmp/turns"
+# job_ms = 8000
+# acp_timeout_ms = 180000
+# team_id = "19:team-id@thread.tacv2"
+# channel_id = "19:channel-id@thread.tacv2"
+# bot_id = "28:bot-id"
+# service_url = "https://smba.trafficmanager.net/teams/"
+# channel_poll_ms = 2000

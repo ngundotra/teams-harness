@@ -29,6 +29,7 @@ function followup(id: string, text: string): InboundMessage {
     serviceUrl: "http://127.0.0.1:9",
     fromId: "user-1",
     conversationType: "personal",
+    surface: { kind: "dm", chatId: "a:personal-1" },
   };
 }
 

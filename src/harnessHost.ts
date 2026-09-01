@@ -1,8 +1,11 @@
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { appendInbox, mcpReadyRolePath, pendingInboxCount, readMcpCalls } from "./inbox.js";
-import { extractPostText, writeScopeFromMessage } from "./mcp/runtime.js";
-import { isPostTool } from "./mcp/tools.js";
+import type { DeployConfig } from "./deployConfig.js";
+import { defaultDeployConfig } from "./deployConfig.js";
+import { extractPostText } from "./mcp/runtime.js";
+import { isPostTool, writeScopeFromSurface } from "./mcp/tools.js";
+import { conversationTypeFromSurface } from "./surface.js";
 import type { MockTeamsMcp } from "./mockMcp.js";
 import { SEEN_EMOJI, readSeenMessageId, seenWalk, writeSeenMessageId } from "./seenCursor.js";
 import { newTurnId, TurnStore, turnsRoot } from "./turnStore.js";
@@ -48,10 +51,12 @@ export class HarnessHost {
   private readonly acpByTurn = new Map<TurnId, AcpClient>();
   private readonly sessionByTurn = new Map<TurnId, string>();
   private readonly injectWaits = new Map<TurnId, Promise<unknown>[]>();
+  readonly deploy: DeployConfig;
 
-  constructor(args: { store: TurnStore; mcp: MockTeamsMcp }) {
+  constructor(args: { store: TurnStore; mcp: MockTeamsMcp; deploy?: DeployConfig }) {
     this.store = args.store;
     this.mcp = args.mcp;
+    this.deploy = args.deploy ?? defaultDeployConfig();
   }
 
   startTurn(message: InboundMessage): TurnRunning {
@@ -84,8 +89,10 @@ export class HarnessHost {
       turnsDir: turnsRoot(),
       conversationId: message.conversationId,
       serviceUrl: message.serviceUrl,
-      conversationType: message.conversationType,
-      writeScope: writeScopeFromMessage(message),
+      conversationType: conversationTypeFromSurface(message.surface),
+      writeScope: writeScopeFromSurface(message.surface),
+      surface: message.surface,
+      deploy: this.deploy,
     };
     if (this.callbackUrl !== undefined) {
       specArgs.callbackUrl = this.callbackUrl;
@@ -98,7 +105,8 @@ export class HarnessHost {
       TURNS_DIR: turnsRoot(),
       CONVERSATION_ID: message.conversationId,
       SERVICE_URL: message.serviceUrl,
-      CONVERSATION_TYPE: message.conversationType,
+      CONVERSATION_TYPE: conversationTypeFromSurface(message.surface),
+      SURFACE_KIND: message.surface.kind,
       GROK_CONFIG: grokConfigForMcp(servers.read, servers.write),
     });
     this.lastSpawnFile = child.spawnfile;
@@ -292,7 +300,14 @@ export class HarnessHost {
   }
 
   private async moveEyes(turnId: TurnId, message: InboundMessage): Promise<void> {
-    this.mcp.rememberInbound(message);
+    this.mcp.rememberInbound({
+      messageId: message.messageId,
+      text: message.text,
+      replyToId: message.replyToId,
+      conversationType: conversationTypeFromSurface(message.surface),
+      conversationId: message.conversationId,
+      surfaceKind: message.surface.kind,
+    });
     const steps = seenWalk(readSeenMessageId(turnId), [message.messageId]);
     let latest = readSeenMessageId(turnId);
     for (const step of steps) {
