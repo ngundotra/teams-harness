@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const pkgRoot = dirname(require.resolve("@microsoft/m365agentsplayground/package.json"));
@@ -59,56 +60,28 @@ if (!clientNext.includes('minHeight:"40px",maxHeight:"276px"')) {
 
 console.log("playground: dm compose hit target 40px");
 
-const CHIP_JS = `(() => {
-  const MARK = /^(👀|⭐)/;
-  const styleId = "pg-chip-style";
-  function ensureStyle() {
-    if (document.getElementById(styleId)) return;
-    const s = document.createElement("style");
-    s.id = styleId;
-    s.textContent = ".pg-chip{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;margin:4px 6px 0 0;padding:0 8px;border-radius:14px;border:1px solid #c7a512;background:#fff6cc;font-size:18px;line-height:28px;vertical-align:middle}.ui-chat__message[data-pg-reactcopy="1"] .ui-chat__message__bubble{outline:2px solid #c7a512}";
-    document.head.appendChild(s);
-  }
-  function restyle() {
-    ensureStyle();
-    const msgs = Array.from(document.querySelectorAll(".ui-chat__message"));
-    for (let i = 0; i < msgs.length; i++) {
-      const msg = msgs[i];
-      const bubble = msg.querySelector(".ui-chat__message__bubble") || msg;
-      const text = (bubble.innerText || "").trim();
-      const m = text.match(MARK);
-      if (!m) continue;
-      msg.setAttribute("data-pg-reactcopy", "1");
-      const prev = i > 0 ? msgs[i - 1] : null;
-      if (!prev) continue;
-      const emoji = m[1];
-      if (prev.querySelector('.pg-chip[data-emoji="' + emoji + '"]')) continue;
-      const chip = document.createElement("span");
-      chip.className = "pg-chip";
-      chip.setAttribute("data-emoji", emoji);
-      chip.textContent = emoji;
-      const body = prev.querySelector(".ui-chat__message__body") || prev;
-      body.appendChild(chip);
-    }
-  }
-  const run = () => { try { restyle(); } catch (e) {} };
-  new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
-  setInterval(run, 400);
-  run();
-})();`;
+// Same restyle table as the previous inlined CHIP_JS. Extracted so the
+// injected script is valid JS (the template quoted data-pg-reactcopy="1"
+// and never booted) and so tests can call the matcher. Always rewrite so
+// a later restyle fix actually lands.
+const restylePath = join(dirname(fileURLToPath(import.meta.url)), "pg-restyle.js");
+const CHIP_JS = readFileSync(restylePath, "utf8");
+if (CHIP_JS.includes("</script>")) {
+  console.error("ungate-playground: pg-restyle.js must not contain </script>");
+  process.exit(1);
+}
 
 const htmlPath = join(pkgRoot, "dist", "client", "index.html");
 let html = readFileSync(htmlPath, "utf8");
-if (!html.includes("pg-chip-boot")) {
-  const boot = '<script id="pg-chip-boot">' + CHIP_JS + "</script></body>";
-  if (!html.includes("</body>")) {
-    console.error("ungate-playground: index.html missing </body>");
-    process.exit(1);
-  }
-  html = html.replace("</body>", boot);
-  writeFileSync(htmlPath, html);
+if (!html.includes("</body>")) {
+  console.error("ungate-playground: index.html missing </body>");
+  process.exit(1);
 }
-if (!html.includes("pg-chip-boot")) {
+html = html.replace(/<script id="pg-chip-boot">[\s\S]*?<\/script>/, "");
+const boot = '<script id="pg-chip-boot">' + CHIP_JS + "</script></body>";
+html = html.replace("</body>", boot);
+writeFileSync(htmlPath, html);
+if (!html.includes("pg-chip-boot") || !html.includes("data-pg-reactcopy")) {
   console.error("ungate-playground: reaction chip script not in index.html");
   process.exit(1);
 }
@@ -133,5 +106,24 @@ if (serverNext.includes(SCHEMA_NEW)) {
   console.log("playground: messageReaction accepted by connector schema");
 } else {
   console.log("playground: schema already patched or pattern missing");
+}
+
+// Playground sendToConversation on a Channel conversation always opens a
+// new Post (new thread root) and ignores replyToId. Native Post ids are
+// already `${channelId};messageid=${messageId}`. Route a Channel post that
+// carries replyToId onto that existing Post conversation so replies stay
+// visually in-thread. Bot path only (createMessage("bot", ...)).
+const THREAD_OLD =
+  'conversation.type===conversation_1.ConversationType.Channel&&(postConversation=this.conversationManager.createConversation(conversation));const messageContent=this.convertActivityToMessageContent(activity),message=this.conversationManager.createMessage("bot"';
+const THREAD_NEW =
+  'if(conversation.type===conversation_1.ConversationType.Channel){const rid=activity.replyToId;if(rid){const pid=conversation_1.Conversation.generatePostConversationId(conversation.id,rid);try{postConversation=this.conversationManager.getConversation(pid)}catch{postConversation=this.conversationManager.createConversation(conversation)}}else postConversation=this.conversationManager.createConversation(conversation);}const messageContent=this.convertActivityToMessageContent(activity),message=this.conversationManager.createMessage("bot"';
+if (serverNext.includes(THREAD_OLD)) {
+  serverNext = serverNext.replace(THREAD_OLD, THREAD_NEW);
+  writeFileSync(distPath, serverNext);
+}
+if (serverNext.includes("generatePostConversationId(conversation.id,rid)")) {
+  console.log("playground: channel replyToId stays on existing post conversation");
+} else {
+  console.log("playground: thread replyToId patch already applied or pattern missing");
 }
 
