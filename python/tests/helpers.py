@@ -20,8 +20,9 @@ def spawn_recorded(env: dict[str, str], extra: dict[str, str] | None = None) -> 
     pythonpath = str(Path(__file__).resolve().parent.parent)
     existing = merged.get("PYTHONPATH", "")
     merged["PYTHONPATH"] = pythonpath if not existing else f"{pythonpath}{os.pathsep}{existing}"
+    merged.setdefault("PYTHONUNBUFFERED", "1")
     return Popen(
-        [sys.executable, str(RECORDED_ACP)],
+        [sys.executable, "-u", str(RECORDED_ACP)],
         stdin=PIPE,
         stdout=PIPE,
         stderr=PIPE,

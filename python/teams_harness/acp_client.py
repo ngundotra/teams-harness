@@ -116,10 +116,13 @@ class AcpClient:
 
     def _read_loop(self) -> None:
         assert self.child.stdout is not None
+        fd = self.child.stdout.fileno()
         buf = b""
         try:
             while True:
-                chunk = self.child.stdout.read(4096)
+                # os.read returns available pipe data. BufferedReader.read(n) can
+                # block until n bytes or EOF, which stalls NDJSON replies.
+                chunk = os.read(fd, 4096)
                 if not chunk:
                     break
                 buf = drain_jsonrpc(buf + chunk, self._on_message)
@@ -128,8 +131,10 @@ class AcpClient:
 
     def _stderr_loop(self) -> None:
         assert self.child.stderr is not None
+        fd = self.child.stderr.fileno()
         try:
-            for chunk in iter(lambda: self.child.stderr.read(4096) if self.child.stderr else b"", b""):
+            while True:
+                chunk = os.read(fd, 4096)
                 if not chunk:
                     break
                 sys.stderr.write(f"[grok] {chunk.decode('utf-8', errors='replace')}")
