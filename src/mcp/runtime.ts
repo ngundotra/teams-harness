@@ -1,5 +1,12 @@
 import { appendMcpCall, drainInbox } from "../inbox.js";
 import { SEEN_EMOJI, readSeenMessageId, seenWalk, writeSeenMessageId } from "../seenCursor.js";
+import type { ReadChannel, ReadPolicy } from "../deployConfig.js";
+import { parseReadPolicy } from "../deployConfig.js";
+import {
+  parseSurface,
+  surfaceFromFields,
+  type Surface,
+} from "../surface.js";
 import {
   type InboxItem,
   type InboundMessage,
@@ -18,6 +25,7 @@ import {
   TOOL_CHAT_UNSET_REACTION,
   TOOL_DRAIN_INBOX,
   TOOL_TEAMS_LIST,
+  TOOL_TEAMS_LIST_RECENT,
   TOOL_TEAMS_LIST_REPLIES,
   TOOL_TEAMS_POST,
   TOOL_TEAMS_REPLY,
@@ -26,9 +34,12 @@ import {
   isPostTool,
   isSetReactionTool,
   isUnsetReactionTool,
+  surfaceFromWriteScope,
   toolAllowedOnRole,
   toolDefsForRole,
+  writeScopeFromSurface,
   type McpRole,
+  type ReadToolContext,
   type WriteScope,
 } from "./tools.js";
 
@@ -45,20 +56,7 @@ export type BindWriteResult =
   | { ok: false; error: string };
 
 export function writeScopeFromMessage(message: InboundMessage): WriteScope {
-  if (message.conversationType === "channel") {
-    const teamId = message.teamId;
-    const channelId = message.channelId;
-    if (teamId === undefined || channelId === undefined) {
-      throw new Error("channel write scope requires teamId and channelId");
-    }
-    return {
-      kind: "channel",
-      teamId,
-      channelId,
-      threadId: message.replyToId ?? message.messageId,
-    };
-  }
-  return { kind: "chat", conversationId: message.conversationId };
+  return writeScopeFromSurface(message.surface);
 }
 
 export function writeScopeFromEnv(env: NodeJS.ProcessEnv = process.env): WriteScope | undefined {
@@ -133,20 +131,40 @@ function bindChannelWrite(
 }
 
 export function bindWriteArgs(
-  scope: WriteScope,
+  surface: Surface,
   toolName: string,
   args: Record<string, unknown>,
 ): BindWriteResult {
-  switch (scope.kind) {
-    case "chat":
-      return bindChatWrite(scope, toolName, args);
-    case "channel":
-      return bindChannelWrite(scope, toolName, args);
+  switch (surface.kind) {
+    case "dm":
+    case "group":
+      return bindChatWrite({ kind: "chat", conversationId: surface.chatId }, toolName, args);
+    case "thread":
+      return bindChannelWrite(
+        {
+          kind: "channel",
+          teamId: surface.teamId,
+          channelId: surface.channelId,
+          threadId: surface.threadId,
+        },
+        toolName,
+        args,
+      );
     default: {
-      const _exhaustive: never = scope;
-      return { ok: false, error: `unknown write scope ${JSON.stringify(_exhaustive)}` };
+      const _exhaustive: never = surface;
+      return { ok: false, error: `unknown surface ${JSON.stringify(_exhaustive)}` };
     }
   }
+}
+
+function surfaceForBind(scope?: WriteScope, surface?: Surface): Surface | undefined {
+  if (surface !== undefined) {
+    return surface;
+  }
+  if (scope !== undefined) {
+    return surfaceFromWriteScope(scope);
+  }
+  return undefined;
 }
 
 
@@ -414,7 +432,14 @@ export function listedChannelMessages(): GraphChatMessage[] {
 /**
  * In-process MCP tool implementation (no turn jsonl). Host poller and tests use this.
  */
-export function applyTool(name: string, rawArgs: unknown, turnId?: TurnId, scope?: WriteScope): unknown {
+export function applyTool(
+  name: string,
+  rawArgs: unknown,
+  turnId?: TurnId,
+  scope?: WriteScope,
+  surface?: Surface,
+  read?: ReadToolContext,
+): unknown {
   const args = isRecord(rawArgs) ? rawArgs : {};
   if (name === TOOL_DRAIN_INBOX) {
     if (turnId === undefined) {
@@ -423,8 +448,9 @@ export function applyTool(name: string, rawArgs: unknown, turnId?: TurnId, scope
     return { items: drainInbox(turnId) };
   }
   if (isPostTool(name)) {
-    if (scope !== undefined) {
-      const bound = bindWriteArgs(scope, name, args);
+    const bindSurface = surfaceForBind(scope, surface);
+    if (bindSurface !== undefined) {
+      const bound = bindWriteArgs(bindSurface, name, args);
       process.stderr.write(
         `[mcp] bind original tool=${name} args=${JSON.stringify(args)} bound=${JSON.stringify(bound)}\n`,
       );
@@ -463,12 +489,74 @@ export function applyTool(name: string, rawArgs: unknown, turnId?: TurnId, scope
     return { value: listChannelValue(args) };
   }
   if (name === TOOL_TEAMS_LIST_REPLIES) {
-    return { value: listChannelRepliesValue(args) };
+    const pinned = pinThreadOnlyReplies(args, read);
+    return { value: listChannelRepliesValue(pinned) };
+  }
+  if (name === TOOL_TEAMS_LIST_RECENT) {
+    return { value: listRecentThreadsValue(args, read) };
   }
   if (TEAM_MCP_TOOL_DEFS.some((t) => t.name === name)) {
     return { ok: true };
   }
   return { ok: false, error: `unknown tool ${name}` };
+}
+
+function pinThreadOnlyReplies(
+  args: Record<string, unknown>,
+  read: ReadToolContext | undefined,
+): Record<string, unknown> {
+  if (read === undefined || read.readPolicy.kind !== "thread-only" || read.surface.kind !== "thread") {
+    return args;
+  }
+  return {
+    ...args,
+    "team-id": read.surface.teamId,
+    "channel-id": read.surface.channelId,
+    "message-id": read.surface.threadId,
+  };
+}
+
+function listRecentThreadsValue(
+  args: Record<string, unknown>,
+  read: ReadToolContext | undefined,
+): GraphChatMessage[] {
+  const targets = recentThreadTargets(args, read);
+  const out: GraphChatMessage[] = [];
+  for (const target of targets) {
+    out.push(...listChannelValue({ "team-id": target.teamId, "channel-id": target.channelId }));
+  }
+  return out;
+}
+
+export function allowedReadChannels(ctx: ReadToolContext): ReadChannel[] {
+  const out: ReadChannel[] = [];
+  if (ctx.surface.kind === "thread") {
+    out.push({ teamId: ctx.surface.teamId, channelId: ctx.surface.channelId });
+  }
+  if (ctx.readPolicy.kind === "allowlist") {
+    for (const ch of ctx.readPolicy.channels) {
+      if (!out.some((x) => x.teamId === ch.teamId && x.channelId === ch.channelId)) {
+        out.push(ch);
+      }
+    }
+  }
+  return out;
+}
+
+function recentThreadTargets(
+  args: Record<string, unknown>,
+  read: ReadToolContext | undefined,
+): ReadChannel[] {
+  const allowed = read !== undefined ? allowedReadChannels(read) : [];
+  const teamId = readString(args["team-id"]);
+  const channelId = readString(args["channel-id"]);
+  if (teamId !== undefined && channelId !== undefined) {
+    if (allowed.length === 0 || allowed.some((c) => c.teamId === teamId && c.channelId === channelId)) {
+      return [{ teamId, channelId }];
+    }
+    return [];
+  }
+  return allowed;
 }
 
 export async function callMcpTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -481,11 +569,14 @@ async function runImplementedTool(
   rawArgs: unknown,
   turnId?: TurnId,
   scope?: WriteScope,
+  surface?: Surface,
+  read?: ReadToolContext,
 ): Promise<{ args: Record<string, unknown>; result: unknown }> {
   const args = isRecord(rawArgs) ? rawArgs : {};
+  const bindSurface = surfaceForBind(scope, surface);
   if (name !== TOOL_DRAIN_INBOX && isGraphConfigured()) {
-    if (scope !== undefined && isPostTool(name)) {
-      const bound = bindWriteArgs(scope, name, args);
+    if (bindSurface !== undefined && isPostTool(name)) {
+      const bound = bindWriteArgs(bindSurface, name, args);
       process.stderr.write(
         `[mcp] bind original tool=${name} args=${JSON.stringify(args)} bound=${JSON.stringify(bound)}\n`,
       );
@@ -494,17 +585,47 @@ async function runImplementedTool(
       }
       return { args: bound.args, result: await executeGraphTool(bound.tool, bound.args) };
     }
+    if (name === TOOL_TEAMS_LIST_REPLIES) {
+      const pinned = pinThreadOnlyReplies(args, read);
+      return { args: pinned, result: await executeGraphTool(name, pinned) };
+    }
+    if (name === TOOL_TEAMS_LIST_RECENT) {
+      return { args, result: { value: await listRecentThreadsGraph(args, read) } };
+    }
     return { args, result: await executeGraphTool(name, args) };
   }
-  const result = applyTool(name, rawArgs, turnId, scope);
+  const result = applyTool(name, rawArgs, turnId, scope, surface, read);
   if (isRecord(result) && isRecord(result.bound) && isRecord(result.bound.args)) {
     return { args: result.bound.args, result };
   }
   return { args, result };
 }
 
-function seenReactionTools(): { set: string; unset: string } {
-  if (process.env.CONVERSATION_TYPE === "channel") {
+async function listRecentThreadsGraph(
+  args: Record<string, unknown>,
+  read: ReadToolContext | undefined,
+): Promise<GraphChatMessage[]> {
+  const targets = recentThreadTargets(args, read);
+  const out: GraphChatMessage[] = [];
+  for (const target of targets) {
+    const listed = await executeGraphTool(TOOL_TEAMS_LIST, {
+      "team-id": target.teamId,
+      "channel-id": target.channelId,
+    });
+    if (isRecord(listed) && Array.isArray(listed.value)) {
+      for (const item of listed.value) {
+        if (isRecord(item) && typeof item.id === "string") {
+          out.push(item as GraphChatMessage);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function seenReactionTools(surface?: Surface): { set: string; unset: string } {
+  const kind = surface?.kind ?? process.env.SURFACE_KIND;
+  if (kind === "thread") {
     return { set: TOOL_TEAMS_SET_REACTION, unset: TOOL_TEAMS_UNSET_REACTION };
   }
   return { set: TOOL_CHAT_SET_REACTION, unset: TOOL_CHAT_UNSET_REACTION };
@@ -525,7 +646,7 @@ async function walkSeenOnDrain(turnId: TurnId, items: InboxItem[]): Promise<void
   if (ids.length === 0) {
     return;
   }
-  const tools = seenReactionTools();
+  const tools = seenReactionTools(surfaceFromEnv());
   const chatId = process.env.CONVERSATION_ID ?? "";
   const steps = seenWalk(readSeenMessageId(turnId), ids);
   let latest = readSeenMessageId(turnId);
@@ -561,9 +682,13 @@ export async function executeTool(
   rawArgs: unknown,
   role: McpRole,
   scope?: WriteScope,
+  surface?: Surface,
+  read?: ReadToolContext,
 ): Promise<unknown> {
   const args = isRecord(rawArgs) ? rawArgs : {};
-  if (!toolAllowedOnRole(role, name)) {
+  const readCtx = read ?? readToolContextFromEnv();
+  const bindSurface = surface ?? surfaceFromEnv() ?? (scope !== undefined ? surfaceFromWriteScope(scope) : undefined);
+  if (!toolAllowedOnRole(role, name, readCtx)) {
     const result = { ok: false, error: "tool not on this server" };
     appendMcpCall(turnId, { tool: name, args, result, at: Date.now() });
     return result;
@@ -576,7 +701,7 @@ export async function executeTool(
     await walkSeenOnDrain(turnId, items);
     return result;
   }
-  const ran = await runImplementedTool(name, rawArgs, turnId, scope);
+  const ran = await runImplementedTool(name, rawArgs, turnId, scope, bindSurface, readCtx);
   appendMcpCall(turnId, { tool: name, args: ran.args, result: ran.result, at: Date.now() });
   await notifyHost(name, ran.args, ran.result);
   return ran.result;
@@ -598,6 +723,107 @@ async function notifyHost(tool: string, args: Record<string, unknown>, result: u
   }
 }
 
-export function toolList(role: McpRole): unknown {
-  return { tools: toolDefsForRole(role) };
+export function toolList(role: McpRole, read?: ReadToolContext): unknown {
+  return { tools: toolDefsForRole(role, read ?? readToolContextFromEnv()) };
+}
+
+export function surfaceFromEnv(env: NodeJS.ProcessEnv = process.env): Surface | undefined {
+  const kind = env.SURFACE_KIND;
+  if (kind === "dm" || kind === "group") {
+    const chatId = env.SURFACE_CHAT_ID ?? env.WRITE_CONVERSATION_ID ?? env.CONVERSATION_ID;
+    if (chatId === undefined || chatId.length === 0) {
+      return undefined;
+    }
+    return { kind, chatId };
+  }
+  if (kind === "thread") {
+    const teamId = env.SURFACE_TEAM_ID ?? env.WRITE_TEAM_ID;
+    const channelId = env.SURFACE_CHANNEL_ID ?? env.WRITE_CHANNEL_ID;
+    const threadId = env.SURFACE_THREAD_ID ?? env.WRITE_THREAD_ID;
+    if (
+      teamId === undefined ||
+      teamId.length === 0 ||
+      channelId === undefined ||
+      channelId.length === 0 ||
+      threadId === undefined ||
+      threadId.length === 0
+    ) {
+      return undefined;
+    }
+    return { kind: "thread", teamId, channelId, threadId };
+  }
+  return parseSurface({
+    kind: env.SURFACE_KIND,
+    chatId: env.SURFACE_CHAT_ID,
+    teamId: env.SURFACE_TEAM_ID,
+    channelId: env.SURFACE_CHANNEL_ID,
+    threadId: env.SURFACE_THREAD_ID,
+  });
+}
+
+export function readPolicyFromEnv(env: NodeJS.ProcessEnv = process.env): ReadPolicy | undefined {
+  const kind = env.READ_POLICY;
+  if (kind === undefined || kind.length === 0) {
+    return undefined;
+  }
+  let channels: ReadChannel[] | undefined;
+  const raw = env.READ_CHANNELS;
+  if (raw !== undefined && raw.length > 0) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        channels = [];
+        for (const item of parsed) {
+          if (!isRecord(item)) {
+            continue;
+          }
+          const teamId = readString(item.teamId) ?? readString(item.team);
+          const channelId = readString(item.channelId) ?? readString(item.channel);
+          if (teamId !== undefined && channelId !== undefined) {
+            channels.push({ teamId, channelId });
+          }
+        }
+      }
+    } catch {
+      channels = undefined;
+    }
+  }
+  try {
+    return parseReadPolicy(kind, channels);
+  } catch {
+    return undefined;
+  }
+}
+
+export function readToolContextFromEnv(env: NodeJS.ProcessEnv = process.env): ReadToolContext | undefined {
+  const surface = surfaceFromEnv(env);
+  const readPolicy = readPolicyFromEnv(env);
+  if (surface === undefined || readPolicy === undefined) {
+    return undefined;
+  }
+  const flag = env.FEATURES_READ_RECENT_THREADS;
+  return {
+    surface,
+    readPolicy,
+    readRecentThreads: flag === "true" || flag === "1",
+  };
+}
+
+/** Kept for inbound parse fallbacks that only have conversationType + ids. */
+export function surfaceFromMessageFields(message: {
+  conversationId: string;
+  conversationType: string;
+  messageId: string;
+  replyToId?: string | undefined;
+  teamId?: string | undefined;
+  channelId?: string | undefined;
+}): Surface {
+  return surfaceFromFields({
+    conversationId: message.conversationId,
+    conversationType: message.conversationType,
+    messageId: message.messageId,
+    replyToId: message.replyToId,
+    teamId: message.teamId,
+    channelId: message.channelId,
+  });
 }

@@ -1,3 +1,4 @@
+import { conversationKeyFromSurface, parseSurface, surfaceFromFields } from "./surface.js";
 import {
   type InboundMessage,
   brandConversationKey,
@@ -32,6 +33,20 @@ export function parseInboundMessage(value: unknown): InboundMessage {
   ) {
     throw new Error("message payload missing required fields");
   }
+  const replyRaw = readString(value.replyToId);
+  const teamId = readString(value.teamId);
+  const channelId = readString(value.channelId);
+  const parsedSurface = parseSurface(value.surface);
+  const surface =
+    parsedSurface ??
+    surfaceFromFields({
+      conversationId,
+      conversationType,
+      messageId,
+      replyToId: replyRaw,
+      teamId,
+      channelId,
+    });
   const msg: InboundMessage = {
     kind: "message",
     messageId: brandMessageId(messageId),
@@ -41,18 +56,19 @@ export function parseInboundMessage(value: unknown): InboundMessage {
     serviceUrl,
     fromId,
     conversationType,
+    surface,
   };
-  const replyRaw = readString(value.replyToId);
   if (replyRaw !== undefined && replyRaw.length > 0) {
     msg.replyToId = brandMessageId(replyRaw);
   }
-  const teamId = readString(value.teamId);
   if (teamId !== undefined && teamId.length > 0) {
     msg.teamId = teamId;
   }
-  const channelId = readString(value.channelId);
   if (channelId !== undefined && channelId.length > 0) {
     msg.channelId = channelId;
+  }
+  if (msg.conversationKey.length === 0) {
+    msg.conversationKey = conversationKeyFromSurface(surface);
   }
   return msg;
 }

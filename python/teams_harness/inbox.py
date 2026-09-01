@@ -58,6 +58,7 @@ def inbox_item_to_json(item: InboxItem) -> dict[str, Any]:
                 "serviceUrl": msg.service_url,
                 "fromId": msg.from_id,
                 "conversationType": msg.conversation_type,
+                "surface": msg.surface,
             },
         }
         if msg.reply_to_id is not None:

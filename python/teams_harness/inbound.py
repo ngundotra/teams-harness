@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .surface import parse_surface, surface_from_fields
 from .types import (
     InboundMessage,
     brand_conversation_key,
@@ -32,6 +33,17 @@ def parse_inbound_message(value: object) -> InboundMessage:
         or conversation_type is None
     ):
         raise ValueError("message payload missing required fields")
+    reply_raw = read_string(value.get("replyToId"))
+    team_id = read_string(value.get("teamId"))
+    channel_id = read_string(value.get("channelId"))
+    surface = parse_surface(value.get("surface")) or surface_from_fields(
+        conversation_id=conversation_id,
+        conversation_type=conversation_type,
+        message_id=message_id,
+        reply_to_id=reply_raw,
+        team_id=team_id,
+        channel_id=channel_id,
+    )
     msg = InboundMessage(
         kind="message",
         message_id=brand_message_id(message_id),
@@ -41,14 +53,12 @@ def parse_inbound_message(value: object) -> InboundMessage:
         service_url=service_url,
         from_id=from_id,
         conversation_type=conversation_type,
+        surface=surface,
     )
-    reply_raw = read_string(value.get("replyToId"))
     if reply_raw:
         msg.reply_to_id = brand_message_id(reply_raw)
-    team_id = read_string(value.get("teamId"))
     if team_id:
         msg.team_id = team_id
-    channel_id = read_string(value.get("channelId"))
     if channel_id:
         msg.channel_id = channel_id
     return msg

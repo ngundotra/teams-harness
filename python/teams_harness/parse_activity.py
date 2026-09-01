@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .surface import conversation_key_from_surface, surface_from_fields
 from .types import (
     ConversationKey,
     InboundEvent,
@@ -112,15 +113,33 @@ def _parse_message(activity: dict[str, Any]) -> ParseResult:
     service_url = read_string(activity.get("serviceUrl")) or ""
     reply_to_id = _read_reply_to_id(activity.get("replyToId"))
     team_id, channel_id = _read_team_channel(activity)
+    conversation = activity.get("conversation")
+    is_group = is_record(conversation) and conversation.get("isGroup") is True
+    try:
+        surface = surface_from_fields(
+            conversation_id=conv_id,
+            conversation_type=conversation_type,
+            is_group=is_group,
+            message_id=msg_id,
+            reply_to_id=reply_to_id,
+            thread_hint=_read_thread_hint(activity),
+            team_id=team_id,
+            channel_id=channel_id,
+        )
+        key = conversation_key_from_surface(surface)
+    except ValueError:
+        surface = {"kind": "dm", "chatId": conv_id}
+        key = conversation_key_of(conv_id, _read_thread_hint(activity))
     event = InboundMessage(
         kind="message",
         message_id=brand_message_id(msg_id),
         text=text,
-        conversation_key=conversation_key_of(conv_id, _read_thread_hint(activity)),
+        conversation_key=key,
         conversation_id=conv_id,
         service_url=service_url,
         from_id=_read_from_id(activity.get("from")),
         conversation_type=conversation_type,
+        surface=surface,
         reply_to_id=reply_to_id,
         team_id=team_id,
         channel_id=channel_id,
@@ -150,7 +169,22 @@ def _build_reaction_events(body: dict[str, Any]) -> list[InboundReaction]:
         return []
     from_id = _read_from_id(body.get("from"))
     service_url = read_string(body.get("serviceUrl")) or ""
-    key = conversation_key_of(conv_id, _read_thread_hint(body))
+    team_id, channel_id = _read_team_channel(body)
+    conversation = body.get("conversation")
+    is_group = is_record(conversation) and conversation.get("isGroup") is True
+    try:
+        surface = surface_from_fields(
+            conversation_id=conv_id,
+            conversation_type=_conversation_type,
+            is_group=is_group,
+            reply_to_id=target,
+            thread_hint=_read_thread_hint(body),
+            team_id=team_id,
+            channel_id=channel_id,
+        )
+        key = conversation_key_from_surface(surface)
+    except ValueError:
+        key = conversation_key_of(conv_id, _read_thread_hint(body))
     out: list[InboundReaction] = []
     for emoji in _reactions_from(body.get("reactionsAdded")):
         out.append(

@@ -6,7 +6,7 @@ This package covers:
 
 - spawn real `grok` (`grok agent --always-approve stdio`), never a shim
 - ACP JSON-RPC over stdio (`initialize`, optional `authenticate`, `session/new` with `teams-read` + `teams-post`, `session/prompt`)
-- one ACP session per conversation+thread (turn id)
+- one ACP session per Surface (DM, group, or channel thread)
 - start prompt, then mid-turn injects as extra `session/prompt` on that session
 - follow-ups that land before `session/new` enqueue to the turn inbox; `inject()` no-ops until the session maps are set; drain is the backup
 - `injectWaits`: in-flight inject prompts must finish before the turn is considered done

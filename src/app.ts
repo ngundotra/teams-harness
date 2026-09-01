@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { ChannelWatcher, createChannelWatcher } from "./channelWatch.js";
+import type { DeployConfig } from "./deployConfig.js";
+import { defaultDeployConfig } from "./deployConfig.js";
 import { dispatchActivity } from "./dispatch.js";
 import { HarnessHost } from "./harnessHost.js";
 import { MockTeamsMcp, type SentMessage } from "./mockMcp.js";
@@ -14,10 +16,10 @@ export type Runtime = {
   channelWatch: ChannelWatcher;
 };
 
-export function createRuntime(): Runtime {
+export function createRuntime(deploy?: DeployConfig): Runtime {
   const store = new TurnStore();
   const mcp = new MockTeamsMcp();
-  const host = new HarnessHost({ store, mcp });
+  const host = new HarnessHost({ store, mcp, deploy: deploy ?? defaultDeployConfig() });
   mcp.attachOutbound({
     ack: async (args) => {
       await postConnector(args.serviceUrl, args.conversationId, { type: "typing" });

@@ -1,3 +1,6 @@
+import type { ReadPolicy } from "../deployConfig.js";
+import type { Surface } from "../surface.js";
+
 export const MCP_TEAMS_READ_SERVER = "teams-read";
 export const MCP_TEAMS_WRITE_SERVER = "teams-post";
 
@@ -8,6 +11,7 @@ export const TOOL_TEAMS_POST = "mcp_graph_teams_postChannelMessage";
 export const TOOL_TEAMS_REPLY = "mcp_graph_teams_replyToChannelMessage";
 export const TOOL_TEAMS_LIST = "mcp_graph_teams_listChannelMessages";
 export const TOOL_TEAMS_LIST_REPLIES = "mcp_graph_teams_listChannelMessageReplies";
+export const TOOL_TEAMS_LIST_RECENT = "mcp_graph_teams_listRecentThreads";
 export const TOOL_CHAT_SET_REACTION = "mcp_graph_chat_setReaction";
 export const TOOL_CHAT_UNSET_REACTION = "mcp_graph_chat_unsetReaction";
 export const TOOL_TEAMS_SET_REACTION = "mcp_graph_teams_setReaction";
@@ -23,6 +27,7 @@ export const READ_TOOLS = [
   TOOL_CHAT_GET,
   TOOL_TEAMS_LIST,
   TOOL_TEAMS_LIST_REPLIES,
+  TOOL_TEAMS_LIST_RECENT,
   TOOL_CHAT_SET_REACTION,
   TOOL_CHAT_UNSET_REACTION,
   TOOL_TEAMS_SET_REACTION,
@@ -102,6 +107,11 @@ export const TEAM_MCP_TOOL_DEFS: McpToolDef[] = [
     ),
   },
   {
+    name: TOOL_TEAMS_LIST_RECENT,
+    description: "List recent thread roots in the current channel and any allowlisted channels.",
+    inputSchema: obj({ "team-id": str, "channel-id": str }, []),
+  },
+  {
     name: TOOL_CHAT_SET_REACTION,
     description: "Set a reaction on a chat message. Added in this MCP wrapper (missing from published Work IQ).",
     inputSchema: obj(
@@ -158,6 +168,7 @@ export function isReadTool(name: string): boolean {
     name === TOOL_CHAT_GET ||
     name === TOOL_TEAMS_LIST ||
     name === TOOL_TEAMS_LIST_REPLIES ||
+    name === TOOL_TEAMS_LIST_RECENT ||
     name === TOOL_CHAT_SET_REACTION ||
     name === TOOL_CHAT_UNSET_REACTION ||
     name === TOOL_TEAMS_SET_REACTION ||
@@ -213,9 +224,84 @@ export function serverNameForRole(role: McpRole): string {
   }
 }
 
-export function toolDefsForRole(role: McpRole): McpToolDef[] {
+export type ReadToolContext = {
+  surface: Surface;
+  readPolicy: ReadPolicy;
+  readRecentThreads: boolean;
+};
+
+function uniqueNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of names) {
+    if (!seen.has(name)) {
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+/**
+ * teams-read tool names for this Surface + ReadPolicy.
+ * thread-only omits listChannelMessages (channel-wide sibling leak).
+ * read_recent_threads off means the recent-threads tool is absent.
+ */
+export function readToolNames(ctx: ReadToolContext): string[] {
+  const drain = [TOOL_DRAIN_INBOX];
+  const chat = [TOOL_CHAT_LIST, TOOL_CHAT_GET, TOOL_CHAT_SET_REACTION, TOOL_CHAT_UNSET_REACTION, ...drain];
+  const threadCore = [TOOL_TEAMS_LIST_REPLIES, TOOL_TEAMS_SET_REACTION, TOOL_TEAMS_UNSET_REACTION, ...drain];
+  const threadWithList = [TOOL_TEAMS_LIST, ...threadCore];
+  const channelExtras = [
+    TOOL_TEAMS_LIST,
+    TOOL_TEAMS_LIST_REPLIES,
+    TOOL_TEAMS_SET_REACTION,
+    TOOL_TEAMS_UNSET_REACTION,
+  ];
+
+  switch (ctx.readPolicy.kind) {
+    case "thread-only": {
+      if (ctx.surface.kind === "thread") {
+        return uniqueNames(threadCore);
+      }
+      return uniqueNames(chat);
+    }
+    case "surface": {
+      if (ctx.surface.kind === "thread") {
+        const names = [...threadWithList];
+        if (ctx.readRecentThreads) {
+          names.push(TOOL_TEAMS_LIST_RECENT);
+        }
+        return uniqueNames(names);
+      }
+      return uniqueNames(chat);
+    }
+    case "allowlist": {
+      const names =
+        ctx.surface.kind === "thread" ? [...threadWithList] : [...chat, ...channelExtras, ...drain];
+      if (ctx.readRecentThreads) {
+        names.push(TOOL_TEAMS_LIST_RECENT);
+      }
+      return uniqueNames(names);
+    }
+    default: {
+      const _exhaustive: never = ctx.readPolicy;
+      throw new Error(`unknown read policy ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+}
+
+export function toolDefsForRead(ctx: ReadToolContext): McpToolDef[] {
+  const allowed = new Set(readToolNames(ctx));
+  return TEAM_MCP_TOOL_DEFS.filter((def) => allowed.has(def.name));
+}
+
+export function toolDefsForRole(role: McpRole, read?: ReadToolContext): McpToolDef[] {
   switch (role) {
     case "read":
+      if (read !== undefined) {
+        return toolDefsForRead(read);
+      }
       return TEAM_MCP_TOOL_DEFS.filter((def) => isReadTool(def.name));
     case "write":
       return TEAM_MCP_TOOL_DEFS.filter((def) => isPostTool(def.name));
@@ -226,15 +312,55 @@ export function toolDefsForRole(role: McpRole): McpToolDef[] {
   }
 }
 
-export function toolAllowedOnRole(role: McpRole, name: string): boolean {
+export function toolAllowedOnRole(role: McpRole, name: string, read?: ReadToolContext): boolean {
   switch (role) {
     case "read":
+      if (read !== undefined) {
+        return readToolNames(read).includes(name);
+      }
       return isReadTool(name);
     case "write":
       return isPostTool(name);
     default: {
       const _exhaustive: never = role;
       throw new Error(`unknown MCP role ${_exhaustive}`);
+    }
+  }
+}
+
+export function writeScopeFromSurface(surface: Surface): WriteScope {
+  switch (surface.kind) {
+    case "dm":
+    case "group":
+      return { kind: "chat", conversationId: surface.chatId };
+    case "thread":
+      return {
+        kind: "channel",
+        teamId: surface.teamId,
+        channelId: surface.channelId,
+        threadId: surface.threadId,
+      };
+    default: {
+      const _exhaustive: never = surface;
+      throw new Error(`unknown surface ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+}
+
+export function surfaceFromWriteScope(scope: WriteScope): Surface {
+  switch (scope.kind) {
+    case "chat":
+      return { kind: "dm", chatId: scope.conversationId };
+    case "channel":
+      return {
+        kind: "thread",
+        teamId: scope.teamId,
+        channelId: scope.channelId,
+        threadId: scope.threadId,
+      };
+    default: {
+      const _exhaustive: never = scope;
+      throw new Error(`unknown write scope ${JSON.stringify(_exhaustive)}`);
     }
   }
 }

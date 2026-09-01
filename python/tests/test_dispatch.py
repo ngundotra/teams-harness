@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from teams_harness.dispatch import dispatch_activity, dispatch_event
-from teams_harness.parse_activity import conversation_key_of, parse_activity
+from teams_harness.parse_activity import parse_activity
 
 from fixtures import inbound_message, personal_activity, thread_activity
 from helpers import make_host, spawn_recorded, touch
@@ -35,7 +35,9 @@ def test_dispatch_activity_uses_conversation_plus_thread() -> None:
     parsed = parse_activity(thread_activity("m1", "channel hello", "root-1"))
     assert parsed.kind == "ok"
     assert parsed.event.kind == "message"
-    assert parsed.event.conversation_key == conversation_key_of("19:channel-1@thread.tacv2", "root-1")
+    assert parsed.event.surface["kind"] == "thread"
+    assert parsed.event.surface["threadId"] == "root-1"
+    assert parsed.event.conversation_key == "19:channel-1@thread.tacv2;messageid=root-1"
 
 
 def test_dispatch_activity_personal_roundtrip(turns_dir: Path, tmp_path: Path) -> None:

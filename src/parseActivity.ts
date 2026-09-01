@@ -1,4 +1,9 @@
 import {
+  conversationKeyFromSurface,
+  surfaceFromFields,
+  type Surface,
+} from "./surface.js";
+import {
   type ConversationKey,
   type InboundEvent,
   type InboundMessage,
@@ -24,7 +29,30 @@ function conversationKeyOf(
   return brandConversationKey(conversationId);
 }
 
-function readConversation(value: unknown): { id: string; conversationType: string } | undefined {
+function surfaceAndKey(args: {
+  conversationId: string;
+  conversationType: string;
+  isGroup?: boolean | undefined;
+  messageId?: string | undefined;
+  replyToId?: string | undefined;
+  threadHint?: string | undefined;
+  teamId?: string | undefined;
+  channelId?: string | undefined;
+}): { surface: Surface; conversationKey: ConversationKey } {
+  try {
+    const surface = surfaceFromFields(args);
+    return { surface, conversationKey: conversationKeyFromSurface(surface) };
+  } catch {
+    return {
+      surface: { kind: "dm", chatId: args.conversationId },
+      conversationKey: conversationKeyOf(args.conversationId, args.threadHint),
+    };
+  }
+}
+
+function readConversation(
+  value: unknown,
+): { id: string; conversationType: string; isGroup?: boolean } | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -33,7 +61,11 @@ function readConversation(value: unknown): { id: string; conversationType: strin
     return undefined;
   }
   const conversationType = readString(value.conversationType) ?? "personal";
-  return { id, conversationType };
+  const out: { id: string; conversationType: string; isGroup?: boolean } = { id, conversationType };
+  if (value.isGroup === true) {
+    out.isGroup = true;
+  }
+  return out;
 }
 
 function readFromId(value: unknown): string {
@@ -108,15 +140,26 @@ function parseMessage(activity: Record<string, unknown>): ParseResult {
   const serviceUrl = readString(activity.serviceUrl) ?? "";
   const replyToId = readReplyToId(activity.replyToId);
   const ids = readTeamChannel(activity);
+  const located = surfaceAndKey({
+    conversationId: conversation.id,
+    conversationType: conversation.conversationType,
+    isGroup: conversation.isGroup,
+    messageId: id,
+    replyToId,
+    threadHint: readThreadHint(activity),
+    teamId: ids.teamId,
+    channelId: ids.channelId,
+  });
   const event: InboundMessage = {
     kind: "message",
     messageId: brandMessageId(id),
     text,
-    conversationKey: conversationKeyOf(conversation.id, readThreadHint(activity)),
+    conversationKey: located.conversationKey,
     conversationId: conversation.id,
     serviceUrl,
     fromId: readFromId(activity.from),
     conversationType: conversation.conversationType,
+    surface: located.surface,
   };
   if (replyToId !== undefined) {
     event.replyToId = replyToId;
@@ -158,7 +201,17 @@ function buildReactionEvents(body: Record<string, unknown>): InboundReaction[] {
   }
   const fromId = readFromId(body.from);
   const serviceUrl = readString(body.serviceUrl) ?? "";
-  const key = conversationKeyOf(conversation.id, readThreadHint(body));
+  const ids = readTeamChannel(body);
+  const located = surfaceAndKey({
+    conversationId: conversation.id,
+    conversationType: conversation.conversationType,
+    isGroup: conversation.isGroup,
+    replyToId: target,
+    threadHint: readThreadHint(body),
+    teamId: ids.teamId,
+    channelId: ids.channelId,
+  });
+  const key = located.conversationKey;
   const out: InboundReaction[] = [];
   for (const emoji of reactionsFrom(body.reactionsAdded)) {
     out.push({

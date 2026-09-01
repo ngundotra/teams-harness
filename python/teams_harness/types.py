@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias, TypedDict
+from typing import Any, Literal, TypeAlias, TypedDict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .surface import Surface
 
 TurnId: TypeAlias = str
 MessageId: TypeAlias = str
@@ -37,6 +40,7 @@ class InboundMessage:
     service_url: str
     from_id: str
     conversation_type: str
+    surface: Surface
     reply_to_id: MessageId | None = None
     team_id: str | None = None
     channel_id: str | None = None

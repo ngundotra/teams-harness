@@ -86,6 +86,7 @@ def _state_to_json(state: TurnState) -> dict[str, object]:
             "serviceUrl": msg.service_url,
             "fromId": msg.from_id,
             "conversationType": msg.conversation_type,
+            "surface": msg.surface,
         },
         "followups": [m.message_id for m in state.followups],
         "inboundReactions": [

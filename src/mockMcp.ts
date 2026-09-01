@@ -22,6 +22,7 @@ export type RememberedInbound = {
   replyToId?: MessageId;
   conversationType?: string;
   conversationId?: string;
+  surfaceKind?: string;
 };
 
 export type OutboundReactionArgs = {
@@ -73,9 +74,10 @@ export class MockTeamsMcp {
   rememberInbound(message: {
     messageId: string;
     text: string;
-    replyToId?: MessageId;
-    conversationType?: string;
-    conversationId?: string;
+    replyToId?: MessageId | undefined;
+    conversationType?: string | undefined;
+    conversationId?: string | undefined;
+    surfaceKind?: string | undefined;
   }): void {
     const rec: RememberedInbound = { text: message.text };
     if (message.replyToId !== undefined) {
@@ -86,6 +88,9 @@ export class MockTeamsMcp {
     }
     if (message.conversationId !== undefined && message.conversationId.length > 0) {
       rec.conversationId = message.conversationId;
+    }
+    if (message.surfaceKind !== undefined) {
+      rec.surfaceKind = message.surfaceKind;
     }
     this.inboundTexts.set(message.messageId, rec);
   }
@@ -280,7 +285,7 @@ export class MockTeamsMcp {
     };
     if (remembered !== undefined) {
       payload.text = remembered.text;
-      if (remembered.conversationType === "channel") {
+      if (remembered.surfaceKind === "thread" || remembered.conversationType === "channel") {
         payload.replyToId = remembered.replyToId ?? brandMessageId(reaction.messageId);
       } else if (remembered.replyToId !== undefined) {
         payload.replyToId = remembered.replyToId;

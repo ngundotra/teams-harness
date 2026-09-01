@@ -1,9 +1,10 @@
+import type { Surface } from "../surface.js";
+import { surfacePromptFields } from "../surface.js";
 import type { InboundMessage } from "../types.js";
 import {
   TOOL_CHAT_POST,
   TOOL_CHAT_SET_REACTION,
   TOOL_DRAIN_INBOX,
-  TOOL_TEAMS_POST,
   TOOL_TEAMS_REPLY,
   TOOL_TEAMS_SET_REACTION,
 } from "../mcp/tools.js";
@@ -11,44 +12,66 @@ import {
 export type StartPayload = {
   v: 1;
   phase: "start";
-  conversationType: string;
-  "chat-id": string;
+  surface: Surface;
   "message-id": string;
   text: string;
+  "chat-id"?: string;
   "team-id"?: string;
   "channel-id"?: string;
+  "thread-id"?: string;
   "reply-to-id"?: string;
 };
+
+function postToolForSurface(surface: Surface): string {
+  switch (surface.kind) {
+    case "dm":
+    case "group":
+      return TOOL_CHAT_POST;
+    case "thread":
+      return TOOL_TEAMS_REPLY;
+    default: {
+      const _exhaustive: never = surface;
+      return _exhaustive;
+    }
+  }
+}
+
+function setToolForSurface(surface: Surface): string {
+  switch (surface.kind) {
+    case "dm":
+    case "group":
+      return TOOL_CHAT_SET_REACTION;
+    case "thread":
+      return TOOL_TEAMS_SET_REACTION;
+    default: {
+      const _exhaustive: never = surface;
+      return _exhaustive;
+    }
+  }
+}
 
 export function startPrompt(message: InboundMessage): string {
   const payload: StartPayload = {
     v: 1,
     phase: "start",
-    conversationType: message.conversationType,
-    "chat-id": message.conversationId,
+    surface: message.surface,
     "message-id": message.messageId,
     text: message.text,
+    ...surfacePromptFields(message.surface),
   };
-  if (message.teamId !== undefined) {
-    payload["team-id"] = message.teamId;
-  }
-  if (message.channelId !== undefined) {
-    payload["channel-id"] = message.channelId;
-  }
   if (message.replyToId !== undefined) {
     payload["reply-to-id"] = message.replyToId;
   }
-  const channel = message.conversationType === "channel";
-  const postTool = channel ? (message.replyToId !== undefined ? TOOL_TEAMS_REPLY : TOOL_TEAMS_POST) : TOOL_CHAT_POST;
-  const setTool = channel ? TOOL_TEAMS_SET_REACTION : TOOL_CHAT_SET_REACTION;
+  const postTool = postToolForSurface(message.surface);
+  const setTool = setToolForSurface(message.surface);
   return [
     "[teams-harness]",
     JSON.stringify(payload),
     "",
     "You are the Teams long-turn worker. You have no Microsoft Graph credentials.",
     "Every Teams/chat/channel operation MUST be an MCP tool.",
-    "list/get/drain/reactions go through teams-read (whole channel or chat, not destination-pinned).",
-    "post/reply go through teams-post, which is bound to this turn's thread — do not try another destination.",
+    "list/get/drain/reactions go through teams-read. Use only the tools that server advertised.",
+    "post/reply go through teams-post, which is bound to this turn's surface — do not try another destination.",
     "Do not call search_tool. Do not spawn subagents. Do not run a shell. Call use_tool with the exact MCP names below.",
     `1. Follow-ups and reactions are injected as extra prompts on this same session. Handle each inject immediately (star if asked via ${setTool}). ${TOOL_DRAIN_INBOX} is only a backup if an inject was missed. Do not sleep, wait, or run a timer.`,
     "2. The harness walks a seen-cursor (eyes) as messages land. Do not set or unset eyes unless the user asks. Other reactions (star) you still set via MCP.",
