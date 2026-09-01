@@ -6,7 +6,7 @@ Same contract as loop 1, but the left rail is **Group Chat**. Grok still writes 
 
 - `grp-open` opens Group Chat from the left rail.
 - `grp-compose` uses the bottom `Type a message...` composer and paper-plane.
-- `grp-ack` shows `👀 <probe>` and `Working on it...`.
+- `grp-ack` shows a 👀 chip on the user message and `Working on it...`. A visible `👀 <probe>` bubble is a fail.
 - `grp-content` later bubble starts with `original text:` and repeats the probe.
 
 ## How to get to it (user POV)
@@ -24,7 +24,7 @@ Preconditions:
 
 - **Open group.** Click **Group Chat**. Placeholder `Type a message...`.
 - **Send probe.** Type `pg-grp-1 <nonce> ping`. Click the paper-plane.
-- **Ack.** `👀 pg-grp-1 <nonce> ping` and `Working on it...`.
+- **Ack.** 👀 chip on the user message + `Working on it...`. No `👀 pg-grp-1 <nonce> ping` bubble.
 - **Content pass.** Later bubble `original text: pg-grp-1 <nonce> ping` (or starts with `original text:` and contains the probe).
 - **State pass.** `sent[]` has that text. `toolsInvoked` includes `mcp_graph_chat_postMessage` (not `mcp_graph_teams_postChannelMessage`).
 - **Proof.** `receipts/verify-teams-harness/04-group-respond/playground.png` (rail shows Group Chat) + `debug-state.json`.

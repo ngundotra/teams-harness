@@ -50,7 +50,7 @@ PORT=3978 PATH="$HOME/.grok/bin:$PATH" npx tsx src/index.ts
 PATH="$HOME/.grok/bin:$PATH" agentsplayground -e http://localhost:3978/api/messages -c msteams -p 56150
 ```
 
-Ungate **after** the playground package is on disk. It turns the mention-gate off, grows the compose/send hit-target (~40px paper-plane), accepts `messageReaction`, and restyles `👀` / `⭐` prefix copies as chips. `npm run playground` ungates then starts only the harness — it does **not** start Agents Playground. You still need `agentsplayground … -p 56150`.
+Ungate **after** the playground package is on disk (`node scripts/ungate-playground.mjs`). It turns the mention-gate off, grows the compose/send hit-target (~40px paper-plane), accepts `messageReaction`, and injects `scripts/pg-restyle.js` (PR 4, now master). That restyle turns harness `👀` / `⭐` prefix copies into chips on the **target** message and hides the copy bubble (`[data-pg-reactcopy='1']{display:none}`). `npm run playground` ungates, then starts **both** the harness and `agentsplayground -p 56150`. The helper `launch` does the same split. Still open **one** tab at `http://localhost:56150/`.
 
 Ready when:
 
@@ -76,7 +76,8 @@ A healthy instance means all of:
 
 - `test -x "$HOME/.grok/bin/grok"` — real binary. Missing → exit 2, machine-gate text, stop. Do not install a fake `grok`.
 - `node_modules/@microsoft/m365agentsplayground` present.
-- Ungate markers in that package: mention-gate off, send button 40px, `messageReaction` in the connector schema, `pg-chip-boot` in `dist/client/index.html`.
+- `scripts/pg-restyle.js` on disk. Ungate injects it as `pg-chip-boot` (look for `__pgRestyle` and `display:none` on `data-pg-reactcopy`). Old inlined CHIP_JS that only outlined copies is stale.
+- Ungate markers: mention-gate off, send button 40px, `messageReaction` in the connector schema.
 - `GET http://localhost:3978/health` → `ok: true` and the listening process is the one `launch` recorded (or you just started it).
 - Playground `GET http://localhost:56150/` → 200.
 - `harness.toml` `read_policy` printed (`surface` for loops 1–10).
@@ -106,23 +107,25 @@ Ground every click in these handles. Prefer visible text and Fluent chat classes
 | Paper-plane send | Button next to that composer. After ungate ≈ 40×40px (`minWidth`/`maxWidth` 40). Hit the button or Enter in DM/group. |
 | `Start a new post` then `Post` | Channel **root** posts only (loop 7, and the root that loops 8–10 hang off) |
 | Thread pane `Type a message...` | Replies under an existing channel post (loops 8–10) |
-| `.ui-chat__message` / `.ui-chat__message__bubble` | Message bubbles |
-| Text `/^(👀\|⭐)/` and optional `.pg-chip[data-emoji="👀\|⭐"]` | Prefix-copy "reactions" (not native chips) |
+| `.fai-OutputCard` (bot), `.fui-Card` (user/channel), `.fymqbz9` (body) | Playground 0.2.28 Fluent cards. `.ui-chat__message` is unused fallback |
+| `.pg-chip[data-emoji="👀"]` / `.pg-chip[data-emoji="⭐"]` on the **target** card | React pass. Prefix-copy bubbles must be hidden (`data-pg-reactcopy="1"`) |
 
 Mixing `Start a new post` with the thread composer **invalidates** the loop. A channel root post opens a thread Surface (`threadId` = that post id). `conversationKey` is `channelId;messageid=threadId`. Playground in-thread display needs outbound `replyToId` = the conversation `;messageid=` numeric suffix.
 
 ### Pass vs ack (every content loop)
 
-Immediate host ack (not a pass):
+Immediate host ack (not a content-loop pass):
 
-- A bubble `👀 <the user text>` (seen-cursor copy; playground cannot render real reaction chips).
+- A **👀 chip** on the user/target message (`.pg-chip[data-emoji="👀"]`).
 - A bubble `Working on it...` / `Working on it…`.
 
-Pass is a **later grok content bubble**, typically starting with `original text:`. Grok takes **15–45s**. Acks alone are not a pass. Do not declare pass when `Working on it...` is still the last bot text.
+A visible `👀 <text>` or `⭐ <text>` **prefix-copy bubble** is a **fail** (shim not applied, or PR 5 in-thread leftover). The harness still posts those copies on the wire (`sent[]` may contain them). Playground chrome must hide them.
+
+Pass for **content** loops is a later grok bubble starting with `original text:`. Grok takes **15–45s**. Acks alone are not a pass.
 
 Mid-turn loops (2, 3, 5, 6, 9, 10): send the second message **while `Working on it...` is still showing**. Waiting until the grok report lands starts a **new** turn and invalidates the inject.
 
-Star loops: user text is `star this` (unique prefix in front). Pass = visible `⭐ <that text>` copy and/or `setReactions[]` with a star. Playground 0.2.28 cannot render real reaction chips; the harness posts a prefix-copy message. After ungate, `.pg-chip` may decorate the previous bubble. Do not claim native chips exist unless that shim is present.
+Star loops (3, 6, 10): user text is `star this` (unique prefix in front). **Pass = a ⭐ chip on the target message** in Playground chrome at `http://localhost:56150/` (one tab, localhost not 127.0.0.1). `/debug/state` `setReactions[]` is supporting evidence, not a substitute for the chip. A visible `⭐ …` prefix-copy bubble is a fail.
 
 ### Browser recipe (loop 1 — the one a later agent must be able to finish)
 
@@ -132,7 +135,7 @@ Preconditions: `doctor` exit 0. One tab at `http://localhost:56150/`. `read_poli
 2. Focus the bottom composer (`Type a message...`).
 3. Type a unique probe `pg-dm-1 <nonce> ping` (nonce = `date +%s` or 6 hex chars).
 4. Click the paper-plane (or Enter).
-5. Capture the ack state: `👀 pg-dm-1 <nonce> ping` and `Working on it...` visible. This is **not** pass.
+5. Capture the ack state: a 👀 chip on the user message and `Working on it...`. No visible `👀 pg-dm-1 <nonce> ping` bubble. This is **not** content pass.
 6. Wait 15–45s. Do not send another Personal Chat message.
 7. Pass when a later bubble starts with `original text:` and repeats the probe.
 8. Evidence: screenshot of that thread + `GET /debug/state` (see Evidence).
@@ -145,7 +148,7 @@ Named receipts dir (survives cleanup):
 
 ```
 receipts/verify-teams-harness/<loop-id>/
-  playground.png          # Playground UI, probe + grok content bubble visible
+  playground.png          # Playground UI: probe + grok content; react loops must show a chip on the target and no prefix-copy bubble
   debug-state.json        # GET http://localhost:3978/debug/state
   notes.md                # nonce, timestamps, pass/fail one-liner
 ```
@@ -159,11 +162,11 @@ curl -sS http://localhost:3978/debug/state > receipts/verify-teams-harness/01-dm
 
 `debug-state.json` must be read, not just saved. For a content-loop pass:
 
-- `sent[]` has an item whose `text` starts with `original text:` and contains the probe (star loops: a `sent[]` item starting with `⭐`).
-- `setReactions[]` records eyes on the inbound message; star loops also record a star.
+- `sent[]` has an item whose `text` starts with `original text:` and contains the probe. Star loops may still list a `⭐ …` string in `sent[]` (wire copy). The **UI** must hide that bubble and show a chip on the target.
+- `setReactions[]` records eyes on the inbound message; star loops also record a star. State without a visible chip is not a react-loop pass.
 - `toolsInvoked` contains the MCP write for that surface (`mcp_graph_chat_postMessage` on DM/group; `mcp_graph_teams_replyToChannelMessage` on thread). No Graph REST URLs.
 - `runningTurns` is `0` after grok finishes (nonzero while `Working on it...` is up).
-- Screenshot shows the Playground chrome (rail + bubbles), not a terminal.
+- Screenshot shows the Playground chrome (rail + cards), not a terminal. React loops: chip on the target, no `👀`/`⭐` prefix-copy bubble.
 
 Proof standards:
 
@@ -183,7 +186,7 @@ Kills **only** the harness and playground PIDs recorded in `/tmp/verify-teams-ha
 
 If you started processes by hand, kill those PIDs the same way (the shells/tmux panes you opened), not by binary name.
 
-Do not revert `scripts/ungate-playground.mjs` patches in `node_modules` unless you are discarding the whole install. Ungate is local to the package install.
+Do not revert `scripts/ungate-playground.mjs` / `scripts/pg-restyle.js` patches in `node_modules` unless you are discarding the whole install. Ungate is local to the package install.
 
 ## Helpers
 
@@ -201,3 +204,5 @@ node .cursor/skills/verify-teams-harness/scripts/harness.mjs cleanup
 `.cursor/skills/verify-teams-harness/features/` is the maintained source. A proof that only drives loop 1 is incomplete when you claimed the whole map. One live loop is enough to prove **this skill** works; ship receipts for every file you claim.
 
 Keep the map honest with `/maintain-verification-skill` after harness or Playground chrome changes.
+
+Last maintain pass (2026-09-01): source reconciled to PR 4 (`scripts/pg-restyle.js` chips + hide prefix copies) and open PR 5 (in-thread leftover 👀 `<p>` rows). Live Playground drive was **blocked** on this generator VM (`$HOME/.grok/bin/grok` ENOENT). Do not treat that as a loop pass. Leave `receipts/verify-teams-harness/` for a grok + playground machine.

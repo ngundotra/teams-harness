@@ -21,8 +21,8 @@ Preconditions:
 - Doctor exit 0. Personal Chat. `runningTurns` is 0.
 - Unique nonce. First line `pg-dm-2 <nonce> start`. Second line `pg-dm-2 <nonce> follow include this`.
 
-- **Start turn.** Send `pg-dm-2 <nonce> start`. Confirm `👀` copy + `Working on it...`.
-- **Inject now.** While `Working on it...` is still the last bot text, send `pg-dm-2 <nonce> follow include this`. You should see eyes walk to the follow-up (`👀 pg-dm-2 <nonce> follow include this`).
+- **Start turn.** Send `pg-dm-2 <nonce> start`. Confirm a 👀 chip on that message + `Working on it...`. No `👀 … start` bubble.
+- **Inject now.** While `Working on it...` is still the last bot text, send `pg-dm-2 <nonce> follow include this`. Eyes walk: 👀 chip on the follow-up. A leftover `👀 pg-dm-2 <nonce> follow include this` bubble is a fail.
 - **Do not wait-then-send.** If the content bubble already landed, you started a new turn. Abort and retry with a new nonce.
 - **Content pass.** Later bubble lists the follow-up (`queued follow-ups: pg-dm-2 <nonce> follow include this` or equivalent). `original text:` still names the start probe.
 - **State pass.** `sent[]` content includes both probes. `toolsInvoked` includes `mcp_graph_chat_postMessage`. `harness_drainInbox` may appear; it is backup, not required if inject worked.
@@ -32,5 +32,5 @@ Preconditions:
 
 - Mid-turn is a timing constraint, not a second conversation. The second send must happen while `Working on it...` is showing.
 - Grok can take 15–45s. That wait is **after** the inject, not before it.
-- Eyes walking to the follow-up is an ack. The content bubble is the pass.
+- Eyes walking to the follow-up is an ack (chip, not a prefix-copy bubble). The content bubble is the pass.
 - Mixing this loop with a star (`star this`) belongs in loop 3, not here.

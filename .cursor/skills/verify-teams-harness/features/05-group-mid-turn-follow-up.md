@@ -21,8 +21,8 @@ Preconditions:
 - Doctor exit 0. Group Chat. `runningTurns` is 0.
 - Start text `pg-grp-2 <nonce> start`. Follow-up `pg-grp-2 <nonce> follow include this`.
 
-- **Start turn.** Send the start probe. Confirm `👀` + `Working on it...`.
-- **Inject.** Send the follow-up while Working on it is still showing. Eyes should walk to the follow-up.
+- **Start turn.** Send the start probe. Confirm a 👀 chip on that message + `Working on it...`. No prefix-copy bubble.
+- **Inject.** Send the follow-up while Working on it is still showing. Eyes walk: 👀 chip on the follow-up. A leftover `👀 … follow` bubble is a fail.
 - **Content pass.** Later bubble lists `pg-grp-2 <nonce> follow include this` under queued follow-ups (or equivalent wording).
 - **State pass.** `sent[]` content includes both probes. `toolsInvoked` includes `mcp_graph_chat_postMessage`. `harness_drainInbox` optional backup.
 - **Proof.** `receipts/verify-teams-harness/05-group-mid-turn-follow-up/playground.png` + `debug-state.json`.
@@ -31,4 +31,4 @@ Preconditions:
 
 - If you wait for the grok report before the second send, you started a new turn. Retry with a new nonce.
 - Do not drive this from Personal Chat or General.
-- Acks (`👀`, Working on it) are not the pass.
+- Acks (👀 chip + Working on it) are not the pass. A visible 👀 prefix-copy bubble is a fail.

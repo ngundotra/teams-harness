@@ -1,12 +1,12 @@
 # Group intra-turn star
 
-Same star contract as loop 3, in **Group Chat**. Mid-turn `star this` must produce a visible `⭐` prefix copy and/or `mcp_graph_chat_setReaction` in `/debug/state`.
+Same star contract as loop 3, in **Group Chat**. Mid-turn `star this` must produce a **⭐ chip on the target message**. A visible `⭐ …` prefix-copy bubble is a fail. `mcp_graph_chat_setReaction` in `/debug/state` is supporting evidence only.
 
 ## Sub-features
 
 - `grp-star-start` starts a Group Chat turn.
 - `grp-star-inject` sends `pg-grp-3 <nonce> star this` while Working on it is showing.
-- `grp-star-copy` shows `⭐ pg-grp-3 <nonce> star this`.
+- `grp-star-chip` shows `.pg-chip[data-emoji="⭐"]` on the target. The prefix-copy bubble is hidden.
 - `grp-star-mcp` records star on `setReactions[]` via `mcp_graph_chat_setReaction`.
 
 ## How to get to it (user POV)
@@ -18,16 +18,17 @@ Same star contract as loop 3, in **Group Chat**. Mid-turn `star this` must produ
 
 Preconditions:
 
-- Doctor exit 0. Ungate applied. Group Chat. `runningTurns` is 0.
+- Doctor exit 0. Ungate + `pg-restyle.js`. Group Chat. One tab at `http://localhost:56150/`.
+- `runningTurns` is 0.
 
-- **Start turn.** Send `pg-grp-3 <nonce> start`. Wait for `👀` + `Working on it...`.
+- **Start turn.** Send `pg-grp-3 <nonce> start`. Wait for a 👀 chip on that message + `Working on it...`. No `👀 … start` bubble.
 - **Star inject.** Send `pg-grp-3 <nonce> star this` while Working on it is showing.
-- **Copy pass.** Visible `⭐ pg-grp-3 <nonce> star this`. Optional `.pg-chip[data-emoji="⭐"]`. No native chip required.
-- **State pass.** `setReactions[]` has a star. `toolsInvoked` includes `mcp_graph_chat_setReaction`.
+- **Chip pass.** ⭐ chip on the target. No visible `⭐ pg-grp-3 <nonce> star this` bubble.
+- **State (supporting).** `setReactions[]` has a star. `toolsInvoked` includes `mcp_graph_chat_setReaction`.
 - **Proof.** `receipts/verify-teams-harness/06-group-intra-turn-star/playground.png` + `debug-state.json`.
 
 ## Gotchas
 
-- Eyes `👀` is not the star pass.
-- Playground 0.2.28 has no real reaction chips. Prefix copy + MCP record is the pass.
+- A 👀 chip is not the star pass.
+- A visible prefix-copy bubble is a fail. Do not treat `setReaction` alone as the receipt.
 - Sending `star this` after the report lands is a new turn.

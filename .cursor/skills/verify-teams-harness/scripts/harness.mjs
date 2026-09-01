@@ -91,6 +91,23 @@ function playgroundPkgRoot() {
 }
 
 function checkUngate() {
+  const restylePath = join(repoRoot, "scripts", "pg-restyle.js");
+  if (!existsSync(restylePath)) {
+    die(1, "doctor: scripts/pg-restyle.js missing — product must include PR 4 playground shim");
+  }
+  const restyle = readFileSync(restylePath, "utf8");
+  if (!restyle.includes("display:none") || !restyle.includes("data-pg-reactcopy")) {
+    die(1, "doctor: pg-restyle.js must hide prefix-copy bubbles (display:none on data-pg-reactcopy)");
+  }
+  const ungateSrc = readFileSync(join(repoRoot, "scripts", "ungate-playground.mjs"), "utf8");
+  if (!ungateSrc.includes("pg-restyle.js")) {
+    die(1, "doctor: ungate-playground.mjs must inject scripts/pg-restyle.js");
+  }
+  if (!restyle.includes('querySelectorAll("p")') || !restyle.includes("fui-Card")) {
+    process.stdout.write(
+      "doctor: warn pg-restyle.js lacks nested <p>/fui-Card hide (PR 5). In-thread mid-turn 👀 leftovers may still show.\n",
+    );
+  }
   const pkgRoot = playgroundPkgRoot();
   if (pkgRoot === undefined) {
     die(1, "doctor: @microsoft/m365agentsplayground not installed (npm install)");
@@ -109,7 +126,8 @@ function checkUngate() {
     "(isPersonalChat||isBotMentioned)&&(afterAll=()=>this.messageConnector.sendCreateMessageActivity(message).catch((()=>{})))",
   );
   const reactionAccepted = server.includes('z.literal("messageReaction")') || server.includes('activity.type==="messageReaction"');
-  const chipBoot = page.includes("pg-chip-boot");
+  const chipBoot = page.includes("pg-chip-boot") && page.includes("__pgRestyle");
+  const hidesCopies = page.includes("data-pg-reactcopy") && page.includes("display:none");
   if (gatedStill) {
     die(1, "doctor: mention-gate still on — run node scripts/ungate-playground.mjs");
   }
@@ -119,10 +137,10 @@ function checkUngate() {
   if (!reactionAccepted) {
     die(1, "doctor: messageReaction not accepted — run node scripts/ungate-playground.mjs");
   }
-  if (!chipBoot) {
-    die(1, "doctor: pg-chip-boot missing — run node scripts/ungate-playground.mjs");
+  if (!chipBoot || !hidesCopies) {
+    die(1, "doctor: pg-restyle.js not injected (need pg-chip-boot + __pgRestyle + hidden copies) — run node scripts/ungate-playground.mjs");
   }
-  process.stdout.write(`doctor: ungate ok ${pkgRoot}\n`);
+  process.stdout.write(`doctor: ungate+pg-restyle ok ${pkgRoot}\n`);
 }
 
 async function httpJson(url) {

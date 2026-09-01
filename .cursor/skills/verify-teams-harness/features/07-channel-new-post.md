@@ -6,7 +6,7 @@ A user creates a **new root post** in My Team → General. The harness opens a t
 
 - `ch-open` opens **My Team** → **General**.
 - `ch-root-compose` uses **Start a new post** then **Post** (not the thread pane).
-- `ch-ack` shows `👀 <probe>` and `Working on it...` on that post's thread.
+- `ch-ack` shows a 👀 chip on the root post and `Working on it...`. A visible `👀 <probe>` bubble is a fail.
 - `ch-content` later in-thread bubble starts with `original text:` and repeats the probe.
 
 ## How to get to it (user POV)
@@ -25,7 +25,7 @@ Preconditions:
 
 - **Open channel.** Click **My Team** → **General**.
 - **New root.** Click **Start a new post**. Type `pg-ch-1 <nonce> ping`. Click **Post**.
-- **Ack.** `👀 pg-ch-1 <nonce> ping` and `Working on it...` appear on that post (thread Surface). `conversationKey` is `channelId;messageid=<that post id>`.
+- **Ack.** A 👀 chip on the root post + `Working on it...` (thread Surface). No `👀 pg-ch-1 <nonce> ping` bubble. `conversationKey` is `channelId;messageid=<that post id>`.
 - **Content pass.** Later bubble **in the same thread** starts with `original text:` and contains `pg-ch-1 <nonce> ping`. It must not appear as a sibling root post.
 - **State pass.** `sent[]` item has `replyToId` equal to the conversation `;messageid=` numeric suffix (Playground needs that to stay in-thread). `toolsInvoked` includes `mcp_graph_teams_replyToChannelMessage`. `runningTurns` returns to 0.
 - **Proof.** `receipts/verify-teams-harness/07-channel-new-post/playground.png` (General + root post + in-thread grok bubble) + `debug-state.json`. Keep this post visible if you will drive loop 8 against it.
