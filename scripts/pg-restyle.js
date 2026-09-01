@@ -22,7 +22,7 @@
   const CSS =
     ".pg-chip{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;margin:4px 6px 0 0;padding:0 8px;border-radius:14px;border:1px solid #c7a512;background:#fff6cc;font-size:18px;line-height:28px;vertical-align:middle}" +
     ".pg-chip-row{display:flex;flex-wrap:wrap;align-items:center;margin-top:4px}" +
-    ".ui-chat__message[data-pg-reactcopy='1'],.ui-chat__item:has(.ui-chat__message[data-pg-reactcopy='1']){display:none!important}";
+    "[data-pg-reactcopy='1']{display:none!important}";
 
   function parseReactCopy(text) {
     const t = String(text ?? "").trim();
@@ -95,9 +95,77 @@
     return out;
   }
 
+  /**
+   * Playground 0.2.28 chat chrome is Fluent v9 (`fai-OutputCard` for bot
+   * bubbles, `fymqbz9` body wrap for user + bot). Older CHIP_JS looked for
+   * Northstar `.ui-chat__message`, which is still in the bundle but unused
+   * in this chrome — keep it as a fallback.
+   */
+  function collectMessages(doc) {
+    const seen = new Set();
+    const out = [];
+    const add = (card, body) => {
+      if (!card || seen.has(card)) {
+        return;
+      }
+      seen.add(card);
+      out.push({ card, body: body || card });
+    };
+    for (const card of doc.querySelectorAll(".fai-OutputCard, .ui-chat__message")) {
+      const body =
+        card.querySelector(".fymqbz9, .ui-chat__message__body, .ui-chat__message__bubble") || card;
+      add(card, body);
+    }
+    for (const card of doc.querySelectorAll(".fui-Card")) {
+      if (card.closest(".fai-OutputCard, .ui-chat__message")) {
+        continue;
+      }
+      const raw = String(card.innerText || "").trim();
+      if (raw.length === 0 || raw.length > 400 || /Start a new post|Getting Started|Limitations/.test(raw)) {
+        continue;
+      }
+      const body = card.querySelector(".fui-Text") || card;
+      add(card, body);
+    }
+    for (const body of doc.querySelectorAll(".fymqbz9")) {
+      const hosted = typeof body.closest === "function" ? body.closest(".fai-OutputCard, .ui-chat__message") : null;
+      if (hosted) {
+        continue;
+      }
+      add(body.parentElement || body, body);
+    }
+    out.sort((a, b) => {
+      if (a.card === b.card) {
+        return 0;
+      }
+      const pos = a.card.compareDocumentPosition(b.card);
+      if (pos & 2) {
+        return 1;
+      }
+      if (pos & 4) {
+        return -1;
+      }
+      return 0;
+    });
+    return out;
+  }
+
   function nodeText(node) {
-    const bubble = node.querySelector(".ui-chat__message__bubble") || node;
-    return String(bubble.innerText || bubble.textContent || "").trim();
+    const bubble = node.querySelector
+      ? node.querySelector(".ui-chat__message__bubble, .fymqbz9") || node
+      : node;
+    if (!bubble.querySelector) {
+      return String(bubble.innerText || bubble.textContent || "").trim();
+    }
+    const chips = bubble.querySelectorAll(".pg-chip, .pg-chip-row");
+    if (chips.length === 0) {
+      return String(bubble.innerText || bubble.textContent || "").trim();
+    }
+    const clone = bubble.cloneNode(true);
+    for (const extra of clone.querySelectorAll(".pg-chip, .pg-chip-row")) {
+      extra.remove();
+    }
+    return String(clone.innerText || clone.textContent || "").trim();
   }
 
   function ensureStyle(doc) {
@@ -128,36 +196,59 @@
     row.appendChild(chip);
   }
 
+  function hideCopy(card) {
+    let n = card;
+    for (let i = 0; i < 4 && n; i++) {
+      n.setAttribute("data-pg-reactcopy", "1");
+      const parent = n.parentElement;
+      if (!parent || parent === n.ownerDocument?.body) {
+        break;
+      }
+      const cards = parent.querySelectorAll(".fai-OutputCard, .ui-chat__message");
+      if (cards.length > 1) {
+        break;
+      }
+      n = parent;
+    }
+  }
+
   function restyleDocument(doc) {
     ensureStyle(doc);
-    const nodes = Array.from(doc.querySelectorAll(".ui-chat__message"));
-    const texts = nodes.map(nodeText);
+    const nodes = collectMessages(doc);
+    const texts = nodes.map((n) => nodeText(n.body));
     const result = applyRestyle(texts);
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       const row = result[i];
       if (row.hidden) {
-        node.setAttribute("data-pg-reactcopy", "1");
+        hideCopy(node.card);
+      } else if (node.card.getAttribute && node.card.getAttribute("data-pg-reactcopy") === "1") {
+        /* keep hidden; React may rewrite siblings */
       } else {
-        node.removeAttribute("data-pg-reactcopy");
+        node.card.removeAttribute("data-pg-reactcopy");
       }
       if (row.chips.length === 0) {
         continue;
       }
-      const body = node.querySelector(".ui-chat__message__body") || node;
       for (const emoji of row.chips) {
-        ensureChip(doc, body, emoji);
+        ensureChip(doc, node.body, emoji);
       }
     }
   }
 
   function boot(doc) {
+    let busy = false;
     const run = () => {
+      if (busy) {
+        return;
+      }
+      busy = true;
       try {
         restyleDocument(doc);
       } catch {
         /* playground chrome only */
       }
+      busy = false;
     };
     if (typeof MutationObserver === "function") {
       new MutationObserver(run).observe(doc.documentElement || doc.body, {

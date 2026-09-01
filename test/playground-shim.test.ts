@@ -19,6 +19,7 @@ const restyle = require("../scripts/pg-restyle.js") as {
     hidden: boolean;
     chips: string[];
   }>;
+  restyleDocument: (doc: unknown) => void;
   CSS: string;
 };
 
