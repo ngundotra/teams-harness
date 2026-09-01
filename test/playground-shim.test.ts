@@ -47,6 +47,32 @@ test("classifyCopies only treats prefix+matching-target as a copy", () => {
   assert.deepEqual(classified[3], { emoji: "⭐", copy: "hello there" });
 });
 
+test("classifyCopies hides in-thread mid-turn follow-up 👀 without a prior sibling card", () => {
+  const classified = restyle.classifyCopies([
+    "shim-ch-5 root post",
+    "Working on it…",
+    "👀 shim-ch-5 root post",
+    "👀 shim-ch-5 follow-up also answer this",
+  ]);
+  assert.equal(classified[0], null);
+  assert.equal(classified[1], null);
+  assert.deepEqual(classified[2], { emoji: "👀", copy: "shim-ch-5 root post" });
+  assert.deepEqual(
+    classified[3],
+    { emoji: "👀", copy: "shim-ch-5 follow-up also answer this" },
+    "follow-up 👀 is a seen-cursor copy even when the follow-up is not in this card list",
+  );
+});
+
+test("classifyCopies matches a ⭐ copy when the target is a line inside a thread card", () => {
+  const classified = restyle.classifyCopies([
+    "Alex Wilber\nshim-ch-5 root post\nshim-ch-5 follow-up also answer this",
+    "⭐ shim-ch-5 follow-up also answer this",
+  ]);
+  assert.equal(classified[0], null);
+  assert.deepEqual(classified[1], { emoji: "⭐", copy: "shim-ch-5 follow-up also answer this" });
+});
+
 test("findTargetIndex skips other copies and matches remaining text", () => {
   const items = [
     { text: "hello there", isCopy: false },
@@ -86,6 +112,20 @@ test("applyRestyle chips a channel root and hides the in-thread prefix copy", ()
   assert.deepEqual(out[0]?.chips, ["⭐"]);
   assert.equal(out[2]?.hidden, false);
   assert.equal(out[3]?.hidden, true);
+});
+
+test("applyRestyle hides mid-turn channel follow-up 👀 leftover", () => {
+  const out = restyle.applyRestyle([
+    "shim-ch-5 root post",
+    "Working on it…",
+    "👀 shim-ch-5 root post",
+    "👀 shim-ch-5 follow-up also answer this",
+    "original text: shim-ch-5 root post",
+  ]);
+  assert.equal(out[2]?.hidden, true);
+  assert.equal(out[3]?.hidden, true);
+  assert.deepEqual(out[0]?.chips, ["👀"]);
+  assert.equal(out[4]?.hidden, false);
 });
 
 test("restyle CSS hides prefix-copy bubbles instead of outlining them", () => {

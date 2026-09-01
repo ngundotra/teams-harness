@@ -33,6 +33,18 @@
     return { emoji: m[1], copy: (m[2] ?? "").trim() };
   }
 
+  function textHasCopy(text, copy) {
+    const want = String(copy ?? "").trim();
+    if (want.length === 0) {
+      return false;
+    }
+    const t = String(text ?? "").trim();
+    if (t === want) {
+      return true;
+    }
+    return t.split(/\n+/).some((line) => line.trim() === want);
+  }
+
   function classifyCopies(texts) {
     return texts.map((text, i) => {
       const parsed = parseReactCopy(text);
@@ -42,8 +54,20 @@
       if (parsed.copy.length === 0) {
         return parsed;
       }
-      for (let j = 0; j < i; j++) {
-        if (String(texts[j] ?? "").trim() === parsed.copy) {
+      // Seen-cursor 👀 copies. The follow-up original often lives in a
+      // thread pane / nested fui-Card line, not as a prior sibling in the
+      // same collected card list (loop 5 leftover).
+      if (parsed.emoji === "👀") {
+        return parsed;
+      }
+      for (let j = 0; j < texts.length; j++) {
+        if (j === i) {
+          continue;
+        }
+        if (parseReactCopy(texts[j])) {
+          continue;
+        }
+        if (textHasCopy(texts[j], parsed.copy)) {
           return parsed;
         }
       }
@@ -54,11 +78,11 @@
   function findTargetIndex(items, copyIndex, copy) {
     const want = String(copy ?? "").trim();
     if (want.length > 0) {
-      for (let i = copyIndex - 1; i >= 0; i--) {
-        if (items[i].isCopy) {
+      for (let i = 0; i < items.length; i++) {
+        if (i === copyIndex || items[i].isCopy) {
           continue;
         }
-        if (String(items[i].text ?? "").trim() === want) {
+        if (textHasCopy(items[i].text, want)) {
           return i;
         }
       }
