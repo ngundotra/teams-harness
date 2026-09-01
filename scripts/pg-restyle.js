@@ -25,12 +25,38 @@
     "[data-pg-reactcopy='1']{display:none!important}";
 
   function parseReactCopy(text) {
-    const t = String(text ?? "").trim();
+    const t = String(text ?? "")
+      .replace(/[\u200B-\u200D\uFEFF\uFE0F]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     const m = t.match(MARK);
     if (!m) {
       return null;
     }
     return { emoji: m[1], copy: (m[2] ?? "").trim() };
+  }
+
+  function copyLeafText(el) {
+    return String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isCopyLeaf(el) {
+    if (!el || (el.closest && el.closest(".pg-chip, .pg-chip-row, [data-pg-chip-row]"))) {
+      return false;
+    }
+    return parseReactCopy(copyLeafText(el)) !== null;
+  }
+
+  function textHasCopy(text, copy) {
+    const want = String(copy ?? "").trim();
+    if (want.length === 0) {
+      return false;
+    }
+    const t = String(text ?? "").trim();
+    if (t === want) {
+      return true;
+    }
+    return t.split(/\n+/).some((line) => line.trim() === want);
   }
 
   function classifyCopies(texts) {
@@ -42,8 +68,20 @@
       if (parsed.copy.length === 0) {
         return parsed;
       }
-      for (let j = 0; j < i; j++) {
-        if (String(texts[j] ?? "").trim() === parsed.copy) {
+      // Seen-cursor 👀 copies. The follow-up original often lives in a
+      // thread pane / nested fui-Card line, not as a prior sibling in the
+      // same collected card list (loop 5 leftover).
+      if (parsed.emoji === "👀") {
+        return parsed;
+      }
+      for (let j = 0; j < texts.length; j++) {
+        if (j === i) {
+          continue;
+        }
+        if (parseReactCopy(texts[j])) {
+          continue;
+        }
+        if (textHasCopy(texts[j], parsed.copy)) {
           return parsed;
         }
       }
@@ -54,11 +92,11 @@
   function findTargetIndex(items, copyIndex, copy) {
     const want = String(copy ?? "").trim();
     if (want.length > 0) {
-      for (let i = copyIndex - 1; i >= 0; i--) {
-        if (items[i].isCopy) {
+      for (let i = 0; i < items.length; i++) {
+        if (i === copyIndex || items[i].isCopy) {
           continue;
         }
-        if (String(items[i].text ?? "").trim() === want) {
+        if (textHasCopy(items[i].text, want)) {
           return i;
         }
       }
@@ -105,11 +143,21 @@
     const seen = new Set();
     const out = [];
     const add = (card, body) => {
-      if (!card || seen.has(card)) {
+      if (!card) {
         return;
       }
-      seen.add(card);
-      out.push({ card, body: body || card });
+      const el = body || card;
+      if (seen.has(el)) {
+        return;
+      }
+      if (seen.has(card) && el !== card && !isCopyLeaf(el)) {
+        return;
+      }
+      seen.add(el);
+      if (!isCopyLeaf(el)) {
+        seen.add(card);
+      }
+      out.push({ card, body: el });
     };
     for (const card of doc.querySelectorAll(".fai-OutputCard, .ui-chat__message")) {
       const body =
@@ -121,11 +169,33 @@
         continue;
       }
       const raw = String(card.innerText || "").trim();
-      if (raw.length === 0 || raw.length > 400 || /Start a new post|Getting Started|Limitations/.test(raw)) {
+      const hasCopy = /👀|⭐/.test(raw);
+      if (raw.length === 0 || /Getting Started|Limitations/.test(raw)) {
+        continue;
+      }
+      if (!hasCopy && (raw.length > 400 || /Start a new post/.test(raw))) {
         continue;
       }
       const body = card.querySelector(".fui-Text") || card;
       add(card, body);
+      // In-thread replies are <p> / fui-Text rows nested in the same
+      // fui-Card as the root. Collect each so hide can see them even
+      // when the first fui-Text wraps the whole thread.
+      for (const p of card.querySelectorAll("p")) {
+        const t = String(p.innerText || p.textContent || "").trim();
+        if (t.length === 0 || t.length > 400) {
+          continue;
+        }
+        if (
+          !parseReactCopy(t) &&
+          body !== card &&
+          typeof body.contains === "function" &&
+          body.contains(p)
+        ) {
+          continue;
+        }
+        add(threadReplyCard(p), p);
+      }
     }
     for (const body of doc.querySelectorAll(".fymqbz9")) {
       const hosted = typeof body.closest === "function" ? body.closest(".fai-OutputCard, .ui-chat__message") : null;
@@ -196,20 +266,70 @@
     row.appendChild(chip);
   }
 
+  function threadReplyCard(el) {
+    let best = el;
+    let n = el;
+    for (let i = 0; i < 8 && n.parentElement; i++) {
+      const parent = n.parentElement;
+      const cls = String(parent.className || "");
+      if (/\bfui-Card\b|\bfai-OutputCard\b|\bui-chat__message\b/.test(cls)) {
+        break;
+      }
+      // Channel replies share one fui-Card. Never return a wrapper that
+      // also holds sibling message <p> rows or other prefix copies.
+      if (parent.querySelectorAll("p").length > 1) {
+        break;
+      }
+      const otherCopies = [...parent.querySelectorAll("p, .fui-Text")].filter(
+        (x) => x !== el && !n.contains(x) && isCopyLeaf(x),
+      );
+      if (otherCopies.length > 0) {
+        break;
+      }
+      n = parent;
+      best = n;
+    }
+    return best;
+  }
+
   function hideCopy(card) {
     let n = card;
-    for (let i = 0; i < 4 && n; i++) {
+    for (let i = 0; i < 6 && n; i++) {
       n.setAttribute("data-pg-reactcopy", "1");
       const parent = n.parentElement;
       if (!parent || parent === n.ownerDocument?.body) {
         break;
       }
-      const cards = parent.querySelectorAll(".fai-OutputCard, .ui-chat__message");
+      const parentCls = String(parent.className || "");
+      if (/\bfui-Card\b|\bfai-OutputCard\b|\bui-chat__message\b/.test(parentCls)) {
+        break;
+      }
+      if (parent.querySelectorAll("p").length > 1) {
+        break;
+      }
+      const cards = parent.querySelectorAll(".fai-OutputCard, .ui-chat__message, .fui-Card");
       if (cards.length > 1) {
         break;
       }
       n = parent;
     }
+  }
+
+  function collectCopyLeaves(doc) {
+    const out = [];
+    for (const root of doc.querySelectorAll(".fui-Card, .fai-OutputCard, .ui-chat__message")) {
+      for (const el of root.querySelectorAll("p, .fui-Text, .fymqbz9")) {
+        if (!isCopyLeaf(el)) {
+          continue;
+        }
+        const nested = [...el.querySelectorAll("p, .fui-Text")].some((c) => c !== el && isCopyLeaf(c));
+        if (nested) {
+          continue;
+        }
+        out.push(el);
+      }
+    }
+    return out;
   }
 
   function restyleDocument(doc) {
@@ -221,7 +341,8 @@
       const node = nodes[i];
       const row = result[i];
       if (row.hidden) {
-        hideCopy(node.card);
+        const multi = node.card.querySelectorAll && node.card.querySelectorAll("p").length > 1;
+        hideCopy(multi ? threadReplyCard(node.body) : node.card);
       } else if (node.card.getAttribute && node.card.getAttribute("data-pg-reactcopy") === "1") {
         /* keep hidden; React may rewrite siblings */
       } else {
@@ -233,6 +354,14 @@
       for (const emoji of row.chips) {
         ensureChip(doc, node.body, emoji);
       }
+    }
+    // Sweep leftover in-card prefix copies collectMessages missed
+    // (first fui-Text wraps the thread, card skipped, shared wrapper).
+    for (const el of collectCopyLeaves(doc)) {
+      if (el.closest && el.closest("[data-pg-reactcopy='1']")) {
+        continue;
+      }
+      hideCopy(threadReplyCard(el));
     }
   }
 
