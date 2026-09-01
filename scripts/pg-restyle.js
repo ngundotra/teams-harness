@@ -25,12 +25,26 @@
     "[data-pg-reactcopy='1']{display:none!important}";
 
   function parseReactCopy(text) {
-    const t = String(text ?? "").trim();
+    const t = String(text ?? "")
+      .replace(/[\u200B-\u200D\uFEFF\uFE0F]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     const m = t.match(MARK);
     if (!m) {
       return null;
     }
     return { emoji: m[1], copy: (m[2] ?? "").trim() };
+  }
+
+  function copyLeafText(el) {
+    return String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isCopyLeaf(el) {
+    if (!el || (el.closest && el.closest(".pg-chip, .pg-chip-row, [data-pg-chip-row]"))) {
+      return false;
+    }
+    return parseReactCopy(copyLeafText(el)) !== null;
   }
 
   function textHasCopy(text, copy) {
@@ -129,11 +143,21 @@
     const seen = new Set();
     const out = [];
     const add = (card, body) => {
-      if (!card || seen.has(card)) {
+      if (!card) {
         return;
       }
-      seen.add(card);
-      out.push({ card, body: body || card });
+      const el = body || card;
+      if (seen.has(el)) {
+        return;
+      }
+      if (seen.has(card) && el !== card && !isCopyLeaf(el)) {
+        return;
+      }
+      seen.add(el);
+      if (!isCopyLeaf(el)) {
+        seen.add(card);
+      }
+      out.push({ card, body: el });
     };
     for (const card of doc.querySelectorAll(".fai-OutputCard, .ui-chat__message")) {
       const body =
@@ -145,21 +169,29 @@
         continue;
       }
       const raw = String(card.innerText || "").trim();
-      if (raw.length === 0 || raw.length > 400 || /Start a new post|Getting Started|Limitations/.test(raw)) {
+      const hasCopy = /👀|⭐/.test(raw);
+      if (raw.length === 0 || /Getting Started|Limitations/.test(raw)) {
+        continue;
+      }
+      if (!hasCopy && (raw.length > 400 || /Start a new post/.test(raw))) {
         continue;
       }
       const body = card.querySelector(".fui-Text") || card;
       add(card, body);
-      // In-thread replies are <p> rows nested in the same fui-Card as the
-      // root (loop 5 follow-up 👀). Collect each so classifyCopies can see
-      // the sibling instead of only the root line. Skip the first body so
-      // we do not hide the whole post.
+      // In-thread replies are <p> / fui-Text rows nested in the same
+      // fui-Card as the root. Collect each so hide can see them even
+      // when the first fui-Text wraps the whole thread.
       for (const p of card.querySelectorAll("p")) {
         const t = String(p.innerText || p.textContent || "").trim();
         if (t.length === 0 || t.length > 400) {
           continue;
         }
-        if (body !== card && typeof body.contains === "function" && body.contains(p)) {
+        if (
+          !parseReactCopy(t) &&
+          body !== card &&
+          typeof body.contains === "function" &&
+          body.contains(p)
+        ) {
           continue;
         }
         add(threadReplyCard(p), p);
@@ -234,34 +266,42 @@
     row.appendChild(chip);
   }
 
-  function threadReplyCard(p) {
-    let n = p;
-    for (let i = 0; i < 6 && n.parentElement; i++) {
+  function threadReplyCard(el) {
+    let best = el;
+    let n = el;
+    for (let i = 0; i < 8 && n.parentElement; i++) {
       const parent = n.parentElement;
       const cls = String(parent.className || "");
-      if (cls.split(/\s+/).includes("fui-Card")) {
-        return n;
+      if (/\bfui-Card\b|\bfai-OutputCard\b|\bui-chat__message\b/.test(cls)) {
+        break;
       }
-      // Channel replies share one fui-Card. Stop before a wrapper that
-      // also holds the real follow-up (or other) <p> rows.
+      // Channel replies share one fui-Card. Never return a wrapper that
+      // also holds sibling message <p> rows or other prefix copies.
       if (parent.querySelectorAll("p").length > 1) {
-        return n;
+        break;
+      }
+      const otherCopies = [...parent.querySelectorAll("p, .fui-Text")].filter(
+        (x) => x !== el && !n.contains(x) && isCopyLeaf(x),
+      );
+      if (otherCopies.length > 0) {
+        break;
       }
       n = parent;
+      best = n;
     }
-    return p;
+    return best;
   }
 
   function hideCopy(card) {
     let n = card;
-    for (let i = 0; i < 4 && n; i++) {
+    for (let i = 0; i < 6 && n; i++) {
       n.setAttribute("data-pg-reactcopy", "1");
       const parent = n.parentElement;
       if (!parent || parent === n.ownerDocument?.body) {
         break;
       }
       const parentCls = String(parent.className || "");
-      if (parentCls.split(/\s+/).includes("fui-Card")) {
+      if (/\bfui-Card\b|\bfai-OutputCard\b|\bui-chat__message\b/.test(parentCls)) {
         break;
       }
       if (parent.querySelectorAll("p").length > 1) {
@@ -275,6 +315,23 @@
     }
   }
 
+  function collectCopyLeaves(doc) {
+    const out = [];
+    for (const root of doc.querySelectorAll(".fui-Card, .fai-OutputCard, .ui-chat__message")) {
+      for (const el of root.querySelectorAll("p, .fui-Text, .fymqbz9")) {
+        if (!isCopyLeaf(el)) {
+          continue;
+        }
+        const nested = [...el.querySelectorAll("p, .fui-Text")].some((c) => c !== el && isCopyLeaf(c));
+        if (nested) {
+          continue;
+        }
+        out.push(el);
+      }
+    }
+    return out;
+  }
+
   function restyleDocument(doc) {
     ensureStyle(doc);
     const nodes = collectMessages(doc);
@@ -284,7 +341,8 @@
       const node = nodes[i];
       const row = result[i];
       if (row.hidden) {
-        hideCopy(node.card);
+        const multi = node.card.querySelectorAll && node.card.querySelectorAll("p").length > 1;
+        hideCopy(multi ? threadReplyCard(node.body) : node.card);
       } else if (node.card.getAttribute && node.card.getAttribute("data-pg-reactcopy") === "1") {
         /* keep hidden; React may rewrite siblings */
       } else {
@@ -296,6 +354,14 @@
       for (const emoji of row.chips) {
         ensureChip(doc, node.body, emoji);
       }
+    }
+    // Sweep leftover in-card prefix copies collectMessages missed
+    // (first fui-Text wraps the thread, card skipped, shared wrapper).
+    for (const el of collectCopyLeaves(doc)) {
+      if (el.closest && el.closest("[data-pg-reactcopy='1']")) {
+        continue;
+      }
+      hideCopy(threadReplyCard(el));
     }
   }
 

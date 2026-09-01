@@ -30,6 +30,7 @@ test("parseReactCopy reads eyes/star prefix copies and ignores real text", () =>
   assert.deepEqual(restyle.parseReactCopy("⭐ star this"), { emoji: "⭐", copy: "star this" });
   assert.deepEqual(restyle.parseReactCopy("👀"), { emoji: "👀", copy: "" });
   assert.deepEqual(restyle.parseReactCopy("👀 "), { emoji: "👀", copy: "" });
+  assert.deepEqual(restyle.parseReactCopy("👀\uFE0F star this"), { emoji: "👀", copy: "star this" });
   assert.equal(restyle.parseReactCopy("original text: ping"), null);
   assert.equal(restyle.parseReactCopy("Working on it…"), null);
 });
@@ -140,6 +141,22 @@ test("applyRestyle chips the in-card follow-up row when collectMessages lists ne
   assert.equal(out[2]?.hidden, true);
 });
 
+test("applyRestyle hides grok+playground loop 5 in-thread 👀 rows", () => {
+  const out = restyle.applyRestyle([
+    "pr5-ch-5b ping",
+    "star this",
+    "👀 star this",
+    "pr5-ch-5 follow-up also answer this",
+    "👀 pr5-ch-5 follow-up also answer this",
+  ]);
+  assert.equal(out[1]?.hidden, false);
+  assert.deepEqual(out[1]?.chips, ["👀"]);
+  assert.equal(out[2]?.hidden, true);
+  assert.equal(out[3]?.hidden, false);
+  assert.deepEqual(out[3]?.chips, ["👀"]);
+  assert.equal(out[4]?.hidden, true);
+});
+
 test("restyle CSS hides prefix-copy bubbles instead of outlining them", () => {
   assert.match(restyle.CSS, /data-pg-reactcopy='1'/);
   assert.match(restyle.CSS, /display:none/);
@@ -154,9 +171,10 @@ test("ungate injects pg-restyle.js and patches replyToId onto existing Post conv
   const restyleSrc = readFileSync(join(root, "scripts", "pg-restyle.js"), "utf8");
   assert.doesNotThrow(() => new Function(restyleSrc));
   assert.match(restyleSrc, /querySelectorAll\("p"\)/, "in-thread follow-up copies are nested <p> rows");
+  assert.match(restyleSrc, /collectCopyLeaves/, "sweep leftover in-card prefix copies");
   assert.match(
     restyleSrc,
-    /includes\("fui-Card"\)/,
+    /fui-Card/,
     "hideCopy must not walk up to the root post card",
   );
 });
