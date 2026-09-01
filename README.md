@@ -24,13 +24,9 @@ Auth is the grok CLI cache or XAI_API_KEY. Never commit auth.json or .env.
     # edit harness.toml (read_policy, features, port, …)
     npm run dev
 
-Playground (ungates compose + reaction copies, then starts the harness):
+Playground (ungates compose, injects the chip/thread restyle, then starts the harness and Agents Playground):
 
     npm run playground
-
-or:
-
-    agentsplayground -e http://localhost:3978/api/messages -c msteams -p 56150
 
 Open http://localhost:56150/  one tab.
 
@@ -63,8 +59,8 @@ How to run them:
 - DM / group: type in the bottom composer, Enter.
 - Channel new post: top Start a new post, then Post. The thread box under an existing post is a reply, not a new post.
 - Mid-turn (2, 5, 9, and the star loops): send the follow-up while Working on it is still showing. Waiting until the grok report lands starts a new turn.
-- Pass is a grok content bubble (original text, follow-ups listed, or a visible star copy). Eyes and Working on it are acks only.
-- Playground cannot render reaction chips. The harness posts a copy of the target (eyes prefix / star prefix). Visible star copy is the react pass.
+- Pass is a grok content bubble (original text, follow-ups listed, or a visible star chip). Eyes and Working on it are acks only.
+- Playground chrome cannot natively render reaction chips. The harness still posts a prefix copy (👀 / ⭐). `npm run playground` restyles those copies into chips on the target message and hides the copy bubble. Visible star chip is the react pass. Channel replies with `replyToId` stay on the existing post conversation so they look like threads.
 
 Keep one playground tab. Passing unit tests without those ten screenshots is not a ship receipt.
 
