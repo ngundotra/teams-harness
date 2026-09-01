@@ -17,3 +17,11 @@ playground-shots/
 *.tap
 turns/
 .DS_Store
+
+# python handoff
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+python/.venv/

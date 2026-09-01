@@ -86,6 +86,14 @@ All optional except grok auth.
 
 Without Graph creds, MCP tools use the playground mock.
 
+## Python ACP handoff
+
+`python/` is a library-only port of the grok ACP handoff (spawn, session/new + teams-read/teams-post, start prompt, mid-turn `session/prompt` inject, inbox+drain backup, injectWaits). It does not replace the TypeScript Bot Framework process.
+
+```bash
+cd python && python3 -m pip install -e '.[dev]' && python3 -m pytest
+```
+
 ## License
 
 MIT
