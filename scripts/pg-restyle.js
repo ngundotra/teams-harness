@@ -150,6 +150,20 @@
       }
       const body = card.querySelector(".fui-Text") || card;
       add(card, body);
+      // In-thread replies are <p> rows nested in the same fui-Card as the
+      // root (loop 5 follow-up 👀). Collect each so classifyCopies can see
+      // the sibling instead of only the root line. Skip the first body so
+      // we do not hide the whole post.
+      for (const p of card.querySelectorAll("p")) {
+        const t = String(p.innerText || p.textContent || "").trim();
+        if (t.length === 0 || t.length > 400) {
+          continue;
+        }
+        if (body !== card && typeof body.contains === "function" && body.contains(p)) {
+          continue;
+        }
+        add(threadReplyCard(p), p);
+      }
     }
     for (const body of doc.querySelectorAll(".fymqbz9")) {
       const hosted = typeof body.closest === "function" ? body.closest(".fai-OutputCard, .ui-chat__message") : null;
@@ -220,6 +234,24 @@
     row.appendChild(chip);
   }
 
+  function threadReplyCard(p) {
+    let n = p;
+    for (let i = 0; i < 6 && n.parentElement; i++) {
+      const parent = n.parentElement;
+      const cls = String(parent.className || "");
+      if (cls.split(/\s+/).includes("fui-Card")) {
+        return n;
+      }
+      // Channel replies share one fui-Card. Stop before a wrapper that
+      // also holds the real follow-up (or other) <p> rows.
+      if (parent.querySelectorAll("p").length > 1) {
+        return n;
+      }
+      n = parent;
+    }
+    return p;
+  }
+
   function hideCopy(card) {
     let n = card;
     for (let i = 0; i < 4 && n; i++) {
@@ -228,7 +260,14 @@
       if (!parent || parent === n.ownerDocument?.body) {
         break;
       }
-      const cards = parent.querySelectorAll(".fai-OutputCard, .ui-chat__message");
+      const parentCls = String(parent.className || "");
+      if (parentCls.split(/\s+/).includes("fui-Card")) {
+        break;
+      }
+      if (parent.querySelectorAll("p").length > 1) {
+        break;
+      }
+      const cards = parent.querySelectorAll(".fai-OutputCard, .ui-chat__message, .fui-Card");
       if (cards.length > 1) {
         break;
       }

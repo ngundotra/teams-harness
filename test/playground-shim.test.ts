@@ -128,6 +128,18 @@ test("applyRestyle hides mid-turn channel follow-up 👀 leftover", () => {
   assert.equal(out[4]?.hidden, false);
 });
 
+test("applyRestyle chips the in-card follow-up row when collectMessages lists nested p", () => {
+  const out = restyle.applyRestyle([
+    "shim-ch-5 root post",
+    "shim-ch-5 follow-up also answer this",
+    "👀 shim-ch-5 follow-up also answer this",
+  ]);
+  assert.equal(out[0]?.hidden, false);
+  assert.equal(out[1]?.hidden, false);
+  assert.deepEqual(out[1]?.chips, ["👀"]);
+  assert.equal(out[2]?.hidden, true);
+});
+
 test("restyle CSS hides prefix-copy bubbles instead of outlining them", () => {
   assert.match(restyle.CSS, /data-pg-reactcopy='1'/);
   assert.match(restyle.CSS, /display:none/);
@@ -141,6 +153,12 @@ test("ungate injects pg-restyle.js and patches replyToId onto existing Post conv
   assert.equal(ungate.includes("const MARK = /^(👀|⭐)/"), false, "old inlined CHIP_JS must be gone");
   const restyleSrc = readFileSync(join(root, "scripts", "pg-restyle.js"), "utf8");
   assert.doesNotThrow(() => new Function(restyleSrc));
+  assert.match(restyleSrc, /querySelectorAll\("p"\)/, "in-thread follow-up copies are nested <p> rows");
+  assert.match(
+    restyleSrc,
+    /includes\("fui-Card"\)/,
+    "hideCopy must not walk up to the root post card",
+  );
 });
 
 test("src still has no Graph SDK and no second control plane in the restyle", () => {
