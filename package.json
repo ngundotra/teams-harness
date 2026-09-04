@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "HARNESS_ACP_TIMEOUT_MS=180000 HARNESS_JOB_MS=15000 PATH=\"$HOME/.grok/bin:$HOME/.local/bin:$PATH\" tsx --test --test-concurrency=1 --test-timeout=240000 test/deployConfig.test.ts test/dispatch.surface.test.ts test/mcp.graph.test.ts test/mcp.write-scope.test.ts test/parseActivity.test.ts test/spawn.test.ts test/seen-cursor.test.ts test/harness.test.ts test/http.test.ts test/verify.loops.test.ts test/verify.channel.loops.test.ts test/channelWatch.test.ts test/playground-shim.test.ts",
+    "test": "HARNESS_ACP_TIMEOUT_MS=180000 HARNESS_JOB_MS=15000 PATH=\"$HOME/.grok/bin:$HOME/.local/bin:$PATH\" tsx --test --test-concurrency=1 --test-timeout=240000 test/deployConfig.test.ts test/dispatch.surface.test.ts test/mcp.graph.test.ts test/mcp.write-scope.test.ts test/parseActivity.test.ts test/spawn.test.ts test/seen-cursor.test.ts test/harnessHost.inject.test.ts test/harness.test.ts test/http.test.ts test/verify.loops.test.ts test/verify.channel.loops.test.ts test/channelWatch.test.ts test/playground-shim.test.ts",
     "test:real": "HARNESS_ACP_TIMEOUT_MS=180000 HARNESS_JOB_MS=15000 PATH=\"$HOME/.grok/bin:$HOME/.local/bin:$PATH\" tsx --test --test-concurrency=1 --test-timeout=240000 test/verify.loops.test.ts",
     "test:handoff": "python3 -m pytest -c python/pyproject.toml --rootdir python python/tests",
     "playground": "node scripts/playground.mjs"

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GROK_ACP_ARGS, GROK_BIN, pathWithLocalGrok } from "../src/grok/spawn.js";
-import { startPrompt } from "../src/grok/prompt.js";
+import { drainPrompt, followupPrompt, startPrompt } from "../src/grok/prompt.js";
 import { teamsMcpServers } from "../src/grok/mcpSpec.js";
 import { brandConversationKey, brandMessageId, brandTurnId, type InboundMessage } from "../src/types.js";
 
@@ -76,9 +76,15 @@ test("startPrompt does not tell grok to sleep", () => {
   const text = startPrompt(message);
   assert.match(text, /injected as extra prompts/);
   assert.match(text, /Do not sleep/);
+  assert.match(text, /fs\/read_text_file/);
+  assert.match(text, /\.cursor\/skills/);
   assert.match(text, /"kind":"dm"/);
   assert.match(text, /"chat-id":"c1"/);
   assert.equal(/Work for \d+ ms|seconds have elapsed|sleep \d+/i.test(text), false);
+  const follow = followupPrompt(message);
+  const drain = drainPrompt();
+  assert.match(follow, /fs\/read_text_file/);
+  assert.match(drain, /fs\/read_text_file/);
 });
 
 test("harness worker path source does not import graph", () => {

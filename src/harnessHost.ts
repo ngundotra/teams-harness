@@ -134,7 +134,7 @@ export class HarnessHost {
     void job.catch((err: unknown) => {
       const text = err instanceof Error ? err.message : "grok failed";
       process.stderr.write(`[host] ${text}\n`);
-      this.store.markDone(turnId);
+      this.releaseTurn(turnId);
     });
     return running;
   }
@@ -289,14 +289,19 @@ export class HarnessHost {
 
     this.mcp.hydrateFromCalls(readMcpCalls(turnId));
     const reply = lastPostText(readMcpCalls(turnId));
-    this.store.markDone(turnId, reply);
-    if (!child.killed) {
+    this.releaseTurn(turnId, reply);
+  }
+
+  private releaseTurn(turnId: TurnId, reply?: string): void {
+    const child = this.children.get(turnId);
+    if (child !== undefined && !child.killed) {
       child.kill("SIGTERM");
     }
     this.children.delete(turnId);
     this.acpByTurn.delete(turnId);
     this.sessionByTurn.delete(turnId);
     this.injectWaits.delete(turnId);
+    this.store.markDone(turnId, reply);
   }
 
   private async moveEyes(turnId: TurnId, message: InboundMessage): Promise<void> {
@@ -347,14 +352,28 @@ export class HarnessHost {
       return;
     }
     process.stderr.write(`[host] inject session/prompt ${sessionId}\n`);
-    const pending = acp.request("session/prompt", {
-      sessionId,
-      prompt: [{ type: "text", text }],
-    });
+    const pending = watchInject(
+      acp.request("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text }],
+      }),
+    );
     const waits = this.injectWaits.get(turnId) ?? [];
     waits.push(pending);
     this.injectWaits.set(turnId, waits);
   }
+}
+
+/** Attach a catch so a mid-turn ACP inject timeout cannot become an unhandled rejection. */
+export function watchInject(pending: Promise<unknown>): Promise<unknown> {
+  return pending.then(
+    (value) => value,
+    (err: unknown) => {
+      const text = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[host] inject failed: ${text}\n`);
+      return undefined;
+    },
+  );
 }
 
 async function waitForMcpReady(turnId: TurnId, timeoutMs: number): Promise<void> {
