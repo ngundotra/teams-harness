@@ -12,6 +12,8 @@ def test_start_prompt_does_not_tell_grok_to_sleep() -> None:
     text = start_prompt(inbound_message("m1", "hi"))
     assert "injected as extra prompts" in text
     assert "Do not sleep" in text
+    assert "fs/read_text_file" in text
+    assert ".cursor/skills" in text
     assert TOOL_CHAT_POST in text
     assert TOOL_DRAIN_INBOX in text
     assert not re.search(r"Work for \d+ ms|seconds have elapsed|sleep \d+", text, re.I)
@@ -21,6 +23,8 @@ def test_followup_and_drain_prompts() -> None:
     follow = followup_prompt(inbound_message("m2", "follow up please"))
     assert '"phase":"inject"' in follow
     assert "follow up please" in follow
+    assert "fs/read_text_file" in follow
     drain = drain_prompt()
     assert '"phase":"drain"' in drain
     assert TOOL_DRAIN_INBOX in drain
+    assert "fs/read_text_file" in drain

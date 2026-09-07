@@ -13,6 +13,11 @@ from .tools import (
 )
 from .types import InboundMessage
 
+NO_NON_MCP_EXPLORE = (
+    "Do not call fs/read_text_file. Do not read .cursor/skills. Do not do any non-MCP exploration. "
+    "Do not call search_tool. Do not spawn subagents. Do not run a shell."
+)
+
 
 def _post_tool(surface: dict[str, str]) -> str:
     return TOOL_TEAMS_REPLY if surface.get("kind") == "thread" else TOOL_CHAT_POST
@@ -44,7 +49,7 @@ def start_prompt(message: InboundMessage) -> str:
             "Every Teams/chat/channel operation MUST be an MCP tool.",
             "list/get/drain/reactions go through teams-read. Use only the tools that server advertised.",
             "post/reply go through teams-post, which is bound to this turn's surface — do not try another destination.",
-            "Do not call search_tool. Do not spawn subagents. Do not run a shell. Call use_tool with the exact MCP names below.",
+            f"{NO_NON_MCP_EXPLORE} Call use_tool with the exact MCP names below.",
             (
                 f"1. Follow-ups and reactions are injected as extra prompts on this same session. "
                 f"Handle each inject immediately (star if asked via {set_tool}). "
@@ -71,7 +76,7 @@ def followup_prompt(message: InboundMessage) -> str:
                 },
                 separators=(",", ":"),
             ),
-            "Follow-up injected mid-turn on this same session. Handle it now (star/react if asked). Include it in the eventual post/reply. Do not sleep. Do not change destination.",
+            f"Follow-up injected mid-turn on this same session. Handle it now (star/react if asked). Include it in the eventual post/reply. Do not sleep. Do not change destination. {NO_NON_MCP_EXPLORE}",
         ]
     )
 
@@ -104,6 +109,6 @@ def drain_prompt() -> str:
         [
             "[teams-harness]",
             json.dumps({"v": 1, "phase": "drain"}, separators=(",", ":")),
-            f"Inbox still has items. Call {TOOL_DRAIN_INBOX} and update the summary via the post/reply MCP tool.",
+            f"Inbox still has items. Call {TOOL_DRAIN_INBOX} and update the summary via the post/reply MCP tool. {NO_NON_MCP_EXPLORE}",
         ]
     )
